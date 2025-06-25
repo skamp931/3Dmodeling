@@ -4,184 +4,205 @@ import numpy as np
 from scipy.spatial import Delaunay
 
 # --- Streamlitページの基本設定 ---
-st.set_page_config(layout="wide", page_title="3D Viewer")
+st.set_page_config(layout="wide", page_title="Advanced 3D Viewer")
 
 # --- セッション状態の初期化 ---
 # st.session_state を使うと、ウィジェットを操作しても変数の値が保持されます。
-# 'lines' というキーがなければ、空のリストで初期化します。
-if 'lines' not in st.session_state:
-    st.session_state.lines = []
+def init_session_state():
+    if 'lines' not in st.session_state:
+        st.session_state.lines = []
+    # 物体の初期Z座標オフセット（敷地に埋まるように調整）
+    if 'object_z_offset' not in st.session_state:
+        st.session_state.object_z_offset = -2.5
+    # 計測結果を保持
+    if 'measurement' not in st.session_state:
+        st.session_state.measurement = None
+    # 埋設体積を保持
+    if 'buried_volume' not in st.session_state:
+        st.session_state.buried_volume = None
 
+init_session_state()
 
-# --- 3D表示のためのサンプルデータを作成する関数 ---
+# --- 定数と平面関数の定義 ---
+# 敷地となる平面の方程式 z = ax + by + c
+PLANE_EQ = {'a': 0.1, 'b': -0.05, 'c': 0}
+
+def get_plane_z(x, y):
+    """指定されたx, y座標に対する平面の高さを返す"""
+    return PLANE_EQ['a'] * x + PLANE_EQ['b'] * y + PLANE_EQ['c']
+
+# --- 3Dデータを作成する関数 ---
 
 def create_site_mesh():
-    """敷地のメッシュデータを作成"""
-    # XY平面上にランダムな点を生成
-    points_2d = np.random.rand(150, 2) * 24 - 12
-    
-    # Delaunay三角分割を使って、点の集まりから三角形のメッシュを生成
-    # これにより、どの3つの点を結べば面になるかが決まる (tri.simplices)
+    """斜めの敷地のメッシュデータを作成"""
+    points_2d = np.random.uniform(-15, 15, size=(200, 2))
     tri = Delaunay(points_2d)
-
-    # Z座標（高さ）にランダムな凹凸を与える
-    z = np.random.uniform(-1.5, -0.5, size=points_2d.shape[0])
-    
-    # 2Dの点群にZ座標を結合して3Dの点群にする
+    z = get_plane_z(points_2d[:, 0], points_2d[:, 1])
     site_points_3d = np.c_[points_2d[:, 0], points_2d[:, 1], z]
-
     return site_points_3d, tri.simplices
 
-def create_object_mesh():
+def create_object_mesh(z_offset=0.0):
     """物体のメッシュデータ（立方体）を作成"""
-    # 立方体の8つの頂点座標を定義
-    vertices = np.array([
-        [0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],
-        [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]
+    base_vertices = np.array([
+        [-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
+        [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]
     ])
-    # 中心に移動させ、サイズを調整し、少し持ち上げる
-    vertices = (vertices - 0.5) * 4
-    vertices[:, 2] += 2
-
-    # 立方体の12個の三角形の面を定義
+    # サイズを2倍にし、指定されたオフセットでZ位置を調整
+    vertices = base_vertices * 2
+    vertices[:, 2] += z_offset
+    
     faces = np.array([
-        [0, 1, 2], [0, 2, 3], [4, 5, 6], [4, 6, 7],
-        [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5],
-        [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]
+        [0, 1, 2], [0, 2, 3], [4, 5, 6], [4, 6, 7], [0, 1, 5], 
+        [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], 
+        [3, 0, 4], [3, 4, 7]
     ])
     return vertices, faces
 
-# --- メインのアプリケーション部分 ---
+def calculate_buried_volume(object_vertices, plane_func, samples=50000):
+    """モンテカルロ法で埋設体積を概算する"""
+    min_coords = object_vertices.min(axis=0)
+    max_coords = object_vertices.max(axis=0)
+    
+    dims = max_coords - min_coords
+    total_volume = dims[0] * dims[1] * dims[2]
+    if total_volume == 0:
+        return 0
 
-st.title("敷地と物体の3Dビューア")
+    # 物体のバウンディングボックス内にランダムな点を生成
+    random_points = np.random.rand(samples, 3) * dims + min_coords
+    
+    # 点が平面の下にあるかどうかをチェック
+    plane_z_at_points = plane_func(random_points[:, 0], random_points[:, 1])
+    buried_mask = random_points[:, 2] < plane_z_at_points
+    
+    # 埋まっている点の割合から体積を計算
+    buried_ratio = np.sum(buried_mask) / samples
+    return total_volume * buried_ratio
+
+# --- メインのアプリケーション部分 ---
+st.title("高機能3Dビューア")
 
 # --- サイドバーのUI ---
+st.sidebar.title("🛠️ ツール")
 
-st.sidebar.title("ツール")
+# セクション1: 物体の操作と体積計算
+with st.sidebar.expander("📦 物体コントロール", expanded=True):
+    st.write("ボタンで物体を上下に移動できます。")
+    col1, col2, col3 = st.columns([1,1,1.5])
+    if col1.button("⬆️ 上へ"):
+        st.session_state.object_z_offset += 0.5
+        st.session_state.buried_volume = None  # 移動したら体積をリセット
+    if col2.button("⬇️ 下へ"):
+        st.session_state.object_z_offset -= 0.5
+        st.session_state.buried_volume = None
 
-# セクション1: 線の追加
-with st.sidebar.expander("線を追加", expanded=True):
+    if col3.button("🔄 位置リセット"):
+        st.session_state.object_z_offset = -2.5
+        st.session_state.buried_volume = None
+
+    st.write("---")
+    if st.button("埋設体積を計算", key="calc_vol"):
+        verts, _ = create_object_mesh(st.session_state.object_z_offset)
+        volume = calculate_buried_volume(verts, get_plane_z)
+        st.session_state.buried_volume = volume
+    
+    if st.session_state.buried_volume is not None:
+        st.metric("埋設部分の体積 (概算)", f"{st.session_state.buried_volume:.2f} m³")
+
+
+# セクション2: 線の追加
+with st.sidebar.expander("📏 線を追加", expanded=False):
     st.write("始点と終点の座標を入力して線を追加します。")
-    # 2つのカラムを作成してUIを整理
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("始点 (A)")
-        x1 = st.number_input("X座標 (A)", -20.0, 20.0, 0.0, 1.0, key="x1")
-        y1 = st.number_input("Y座標 (A)", -20.0, 20.0, -5.0, 1.0, key="y1")
-        z1 = st.number_input("Z座標 (A)", -20.0, 20.0, 5.0, 1.0, key="z1")
+        x1 = st.number_input("X (始点)", -20.0, 20.0, 0.0, 1.0, key="x1")
+        y1 = st.number_input("Y (始点)", -20.0, 20.0, -8.0, 1.0, key="y1")
+        z1 = st.number_input("Z (始点)", -20.0, 20.0, 5.0, 1.0, key="z1")
     with col2:
-        st.subheader("終点 (B)")
-        x2 = st.number_input("X座標 (B)", -20.0, 20.0, 5.0, 1.0, key="x2")
-        y2 = st.number_input("Y座標 (B)", -20.0, 20.0, 5.0, 1.0, key="y2")
-        z2 = st.number_input("Z座標 (B)", -20.0, 20.0, 0.0, 1.0, key="z2")
+        x2 = st.number_input("X (終点)", -20.0, 20.0, 8.0, 1.0, key="x2")
+        y2 = st.number_input("Y (終点)", -20.0, 20.0, -8.0, 1.0, key="y2")
+        z2 = st.number_input("Z (終点)", -20.0, 20.0, 0.0, 1.0, key="z2")
 
-    # ボタンが押されたら、入力された座標をリストに追加
     if st.button("線を追加"):
-        new_line = {
-            "start": [x1, y1, z1],
-            "end": [x2, y2, z2]
-        }
-        st.session_state.lines.append(new_line)
-
-    # 追加した線をクリアするボタン
+        st.session_state.lines.append({"start": [x1, y1, z1], "end": [x2, y2, z2]})
     if st.button("全ての線を削除"):
         st.session_state.lines = []
 
 
-# セクション2: 距離の計測
-with st.sidebar.expander("2点間の距離を計測", expanded=True):
-    st.write("2点の座標を入力して距離を計算します。")
+# セクション3: 距離の計測
+with st.sidebar.expander("📐 2点間の距離を計測", expanded=False):
     col3, col4 = st.columns(2)
     with col3:
-        st.subheader("点1")
-        xa = st.number_input("X座標 (点1)", -20.0, 20.0, -3.0, 1.0, key="xa")
-        ya = st.number_input("Y座標 (点1)", -20.0, 20.0, -3.0, 1.0, key="ya")
-        za = st.number_input("Z座標 (点1)", -20.0, 20.0, 0.0, 1.0, key="za")
+        xa = st.number_input("X (点1)", -20.0, 20.0, -5.0, 1.0, key="xa")
+        ya = st.number_input("Y (点1)", -20.0, 20.0, -5.0, 1.0, key="ya")
+        za = st.number_input("Z (点1)", -20.0, 20.0, 0.0, 1.0, key="za")
     with col4:
-        st.subheader("点2")
-        xb = st.number_input("X座標 (点2)", -20.0, 20.0, 3.0, 1.0, key="xb")
-        yb = st.number_input("Y座標 (点2)", -20.0, 20.0, 3.0, 1.0, key="yb")
-        zb = st.number_input("Z座標 (点2)", -20.0, 20.0, 4.0, 1.0, key="zb")
+        xb = st.number_input("X (点2)", -20.0, 20.0, 5.0, 1.0, key="xb")
+        yb = st.number_input("Y (点2)", -20.0, 20.0, 5.0, 1.0, key="yb")
+        zb = st.number_input("Z (点2)", -20.0, 20.0, 4.0, 1.0, key="zb")
 
-    # ボタンが押されたら距離を計算して表示
     if st.button("距離を計算"):
-        point_a = np.array([xa, ya, za])
-        point_b = np.array([xb, yb, zb])
-        # np.linalg.normで2点間のユークリッド距離を計算
-        distance = np.linalg.norm(point_a - point_b)
-        st.metric("2点間の距離", f"{distance:.2f}")
+        p1 = np.array([xa, ya, za]); p2 = np.array([xb, yb, zb])
+        dist = np.linalg.norm(p1 - p2)
+        st.session_state.measurement = {"p1": p1, "p2": p2, "dist": dist}
+    
+    if st.session_state.measurement:
+        st.metric("計測距離", f"{st.session_state.measurement['dist']:.2f}")
 
 
 # --- 3Dグラフの描画 ---
-
-# グラフオブジェクトを初期化
 fig = go.Figure()
 
 # データを作成
 site_vertices, site_faces = create_site_mesh()
-object_vertices, object_faces = create_object_mesh()
+object_vertices, object_faces = create_object_mesh(st.session_state.object_z_offset)
 
-# 1. 敷地データを3Dメッシュとして追加
-fig.add_trace(go.Mesh3d(
-    x=site_vertices[:, 0],
-    y=site_vertices[:, 1],
-    z=site_vertices[:, 2],
-    i=site_faces[:, 0],
-    j=site_faces[:, 1],
-    k=site_faces[:, 2],
-    color='lightgreen',
-    opacity=0.8,
-    name='敷地',
-    hoverinfo='none' # ホバーしても情報を表示しない
-))
+# 1. 敷地
+fig.add_trace(go.Mesh3d(x=site_vertices[:,0], y=site_vertices[:,1], z=site_vertices[:,2],
+    i=site_faces[:,0], j=site_faces[:,1], k=site_faces[:,2],
+    color='lightgreen', opacity=0.7, name='敷地', hoverinfo='none'))
 
-# 2. 物体データを3Dメッシュとして追加
-fig.add_trace(go.Mesh3d(
-    x=object_vertices[:, 0],
-    y=object_vertices[:, 1],
-    z=object_vertices[:, 2],
-    i=object_faces[:, 0],
-    j=object_faces[:, 1],
-    k=object_faces[:, 2],
-    color='royalblue',
-    opacity=0.9,
-    name='物体',
-    hoverinfo='none'
-))
+# 2. 物体
+fig.add_trace(go.Mesh3d(x=object_vertices[:,0], y=object_vertices[:,1], z=object_vertices[:,2],
+    i=object_faces[:,0], j=object_faces[:,1], k=object_faces[:,2],
+    color='royalblue', opacity=1.0, name='物体', hoverinfo='none'))
 
-# 3. 追加された線をグラフに描画
+# 3. 追加された線と座標を表示
 for i, line in enumerate(st.session_state.lines):
-    start = line["start"]
-    end = line["end"]
-    fig.add_trace(go.Scatter3d(
-        x=[start[0], end[0]],
-        y=[start[1], end[1]],
-        z=[start[2], end[2]],
-        mode='lines',
-        line=dict(color='red', width=5),
-        name=f'追加した線 {i+1}'
-    ))
+    start, end = line["start"], line["end"]
+    fig.add_trace(go.Scatter3d(x=[start[0], end[0]], y=[start[1], end[1]], z=[start[2], end[2]],
+        mode='lines', line=dict(color='red', width=5), name=f'追加線{i+1}'))
+    # 座標ラベルを追加
+    fig.add_trace(go.Scatter3d(x=[start[0], end[0]], y=[start[1], end[1]], z=[start[2], end[2]],
+        mode='text', text=[f"({p[0]:.1f}, {p[1]:.1f}, {p[2]:.1f})" for p in [start, end]],
+        textfont=dict(color="darkred", size=10), textposition='middle right', hoverinfo='none'))
+
+# 4. 計測した距離を表示
+if st.session_state.measurement:
+    m = st.session_state.measurement
+    p1, p2, dist = m['p1'], m['p2'], m['dist']
+    mid_point = (p1 + p2) / 2
+    # 計測線
+    fig.add_trace(go.Scatter3d(x=[p1[0], p2[0]], y=[p1[1], p2[1]], z=[p1[2], p2[2]],
+        mode='lines', line=dict(color='orange', width=7, dash='dash'), name='計測線'))
+    # 距離ラベル
+    fig.add_trace(go.Scatter3d(x=[mid_point[0]], y=[mid_point[1]], z=[mid_point[2]],
+        mode='text', text=[f"距離: {dist:.2f}"],
+        textfont=dict(color="orange", size=12), hoverinfo='none'))
 
 
 # グラフのレイアウト設定
 fig.update_layout(
-    title_text='3Dビューア',
+    title_text='インタラクティブ3Dビューア',
     scene=dict(
         xaxis=dict(title='X軸', range=[-15, 15]),
         yaxis=dict(title='Y軸', range=[-15, 15]),
-        zaxis=dict(title='Z軸 (高さ)', range=[-5, 15]),
-        aspectratio=dict(x=1, y=1, z=0.5), # 各軸のスケールの比率
-        camera_eye=dict(x=1.5, y=1.5, z=1.0) # 初期カメラ視点
+        zaxis=dict(title='Z軸 (高さ)', range=[-10, 15]),
+        aspectratio=dict(x=1, y=1, z=0.5),
+        camera_eye=dict(x=1.8, y=1.8, z=1.2)
     ),
-    margin=dict(l=0, r=0, b=0, t=40)
+    margin=dict(l=0, r=0, b=0, t=40),
+    showlegend=False
 )
 
-# Streamlitでグラフを表示
 st.plotly_chart(fig, use_container_width=True, height=700)
-
-st.info("""
-**操作方法:**
-- **ドラッグ:** 視点を回転できます。
-- **マウスホイール:** ズームイン・ズームアウトできます。
-- **左のサイドバー:** 線を追加したり、2点間の距離を計測したりできます。
-""")
