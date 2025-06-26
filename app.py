@@ -163,11 +163,14 @@ if pillars_config:
         with cols[i]:
             st.markdown(f"**{pillar_id}脚**")
             # === エラー修正箇所 ===
-            # st.rerun() を削除し、Streamlitの自然な再描画に任せます
+            # 状態を変更した直後に st.rerun() を呼び出し、スクリプトを再実行させます。
+            # これにより、UIの状態が常にクリーンに保たれ、エラーを防ぎます。
             if st.button(f"⬆️##{pillar_id}",use_container_width=True):
                 st.session_state.pillar_offsets[pillar_id]+=0.5
+                st.rerun()
             if st.button(f"⬇️##{pillar_id}",use_container_width=True):
                 st.session_state.pillar_offsets[pillar_id]-=0.5
+                st.rerun()
             
             x_pos, y_pos = config['pos']; z_offset = st.session_state.pillar_offsets[pillar_id]
             total_h = config['frustum_h']+config['base_cyl_h']+config['main_cyl_h']
@@ -177,7 +180,6 @@ if pillars_config:
             v1,_=create_frustum_mesh(frustum_pos, config['frustum_r_bottom'], config['frustum_r_top'], config['frustum_h'])
             v2,_=create_cylinder_mesh(base_cyl_pos, config['base_cyl_r'], config['base_cyl_h'])
             vol=calculate_buried_volume_for_one_pillar([v1,v2], get_plane_z)
-            # st.metricの引数をキーワード引数で明示的に指定
             st.metric(label="埋設体積", value=f"{vol:.2f} m³", key=f"vol_{pillar_id}")
 
 # --- 3Dグラフ描画 ---
