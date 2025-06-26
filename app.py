@@ -159,7 +159,14 @@ for pillar_id, config in pillars_config.items():
     total_h = config['base_cyl_h'] + config['main_cyl_h'] 
     init_z = get_plane_z(x, y) - (total_h * 4/5)
     
-    base_pos_z = init_z + z_off
+    original_base_pos_z = init_z + z_off
+    
+    # --- 基礎の上面の高さを中間点に設定 ---
+    site_z_at_center = get_plane_z(x, y)
+    foundation_top_z = (original_base_pos_z + site_z_at_center) / 2.0
+    
+    # --- 新しいパーツの位置を計算 ---
+    base_pos_z = foundation_top_z
     main_pos_z = base_pos_z + config['base_cyl_h']
     
     base_pos = [x, y, base_pos_z]
@@ -167,7 +174,7 @@ for pillar_id, config in pillars_config.items():
     
     # --- 新しい基礎柱（計算対象）---
     foundation_verts, foundation_faces = create_slanted_frustum_mesh(
-        [x, y, 0], config['foundation_r_bottom'], config['foundation_r_top'], base_pos_z, get_plane_z
+        [x, y, 0], config['foundation_r_bottom'], config['foundation_r_top'], foundation_top_z, get_plane_z
     )
     fig.add_trace(go.Mesh3d(x=foundation_verts[:,0], y=foundation_verts[:,1], z=foundation_verts[:,2], i=foundation_faces[:,0],j=foundation_faces[:,1],k=foundation_faces[:,2], color='limegreen', opacity=0.3, name=f"Foundation {pillar_id}"))
     
