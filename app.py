@@ -30,10 +30,11 @@ def create_mesh_from_vertices(vertices):
         st.error(f"メッシュの生成に失敗しました: {e}")
         return np.array([]), np.array([])
 
-def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
-    """通常の円柱の頂点と面データを生成する"""
+def create_elliptical_cylinder_mesh(center_pos, radius_x, radius_y, height, n_segments=32):
+    """楕円円柱の頂点と面データを生成する"""
     theta = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
-    x_c, y_c = radius * np.cos(theta), radius * np.sin(theta)
+    x_c = radius_x * np.cos(theta)
+    y_c = radius_y * np.sin(theta)
     
     verts = []
     # Bottom, Top, Center points
@@ -56,18 +57,20 @@ def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
         
     return verts, np.array(faces, dtype=int)
 
-def create_slanted_foundation_mesh(center_pos, radius, top_z, plane_func, n_segments=32):
-    """敷地面に沿った基礎柱のメッシュを生成する"""
+def create_slanted_elliptical_frustum_mesh(center_pos, bottom_radius_x, bottom_radius_y, top_radius_x, top_radius_y, top_z, plane_func, n_segments=32):
+    """敷地面に沿った楕円円錐台のメッシュを生成する"""
     theta = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
-    x_c, y_c = radius * np.cos(theta), radius * np.sin(theta)
     
     verts = []
-    # Top circle vertices (at a fixed height)
+    # Top ellipse vertices (at a fixed height)
+    xt, yt = top_radius_x * np.cos(theta), top_radius_y * np.sin(theta)
     for i in range(n_segments):
-        verts.append([center_pos[0] + x_c[i], center_pos[1] + y_c[i], top_z])
-    # Bottom circle vertices (Z value follows the plane)
+        verts.append([center_pos[0] + xt[i], center_pos[1] + yt[i], top_z])
+        
+    # Bottom ellipse vertices (Z value follows the plane)
+    xb, yb = bottom_radius_x * np.cos(theta), bottom_radius_y * np.sin(theta)
     for i in range(n_segments):
-        px, py = center_pos[0] + x_c[i], center_pos[1] + y_c[i]
+        px, py = center_pos[0] + xb[i], center_pos[1] + yb[i]
         pz = plane_func(px, py)
         verts.append([px, py, pz])
     
@@ -94,27 +97,11 @@ def create_slanted_foundation_mesh(center_pos, radius, top_z, plane_func, n_segm
 
 
 def calculate_buried_volume(verts_list, plane_func, samples=5000):
-    """与えられた頂点群の埋設体積を計算する（このアプリでは基礎柱のみ対象）"""
     if not verts_list or len(verts_list[0]) == 0: return 0
     all_vertices = np.vstack(verts_list)
     min_c, max_c = all_vertices.min(axis=0), all_vertices.max(axis=0)
     dims, bbox_volume = max_c - min_c, np.prod(max_c - min_c)
     if bbox_volume == 0: return 0
-    
-    # モンテカルロ法で体積を近似
-    random_points = np.random.rand(samples, 3) * dims + min_c
-    
-    # Note: This is an approximation of the bounding box volume, not the true mesh volume.
-    # For a simple cylinder-like shape, it's a reasonable estimate.
-    # A more accurate method would be point-in-mesh tests, which are much slower.
-    
-    # 基礎柱は定義上、常に敷地面より下なので、単純にバウンディングボックスの体積を返す
-    # ただし、より正確には、その形状の体積を計算すべき
-    # ここでは簡易的に、理論上の円柱体積を計算する
-    height = np.mean(all_vertices[:, 2].max() - plane_func(all_vertices[:, 0], all_vertices[:, 1]))
-    radius = np.mean(np.sqrt(all_vertices[:,0]**2 + all_vertices[:,1]**2)) # this is not robust
-    
-    # For simplicity and performance, we continue using the bounding box approximation
     return bbox_volume
 
 # --- データ定義 ---
@@ -125,12 +112,15 @@ def get_default_site_data():
 
 def get_default_pillars_config():
     dist = 7.0 / 2.0
-    return {
-        'A': {'pos': [-dist, dist], 'base_cyl_r': 2.5, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
-        'B': {'pos': [dist, dist], 'base_cyl_r': 2.5, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
-        'C': {'pos': [dist, -dist], 'base_cyl_r': 2.5, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
-        'D': {'pos': [-dist, -dist], 'base_cyl_r': 2.5, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
+    rx_ratio = 1.0
+    ry_ratio = 1.5
+    config = {
+        'A': {'pos': [-dist, dist], 'foundation_r_bottom_x': 2.5*rx_ratio, 'foundation_r_bottom_y': 2.5*ry_ratio, 'foundation_r_top_x': 2.0*rx_ratio, 'foundation_r_top_y': 2.0*ry_ratio, 'base_cyl_r_x': 2.0*rx_ratio, 'base_cyl_r_y': 2.0*ry_ratio, 'base_cyl_h': 1.5, 'main_cyl_r_x': 0.5*rx_ratio, 'main_cyl_r_y': 0.5*ry_ratio, 'main_cyl_h': 6.0},
+        'B': {'pos': [dist, dist], 'foundation_r_bottom_x': 2.5*rx_ratio, 'foundation_r_bottom_y': 2.5*ry_ratio, 'foundation_r_top_x': 2.0*rx_ratio, 'foundation_r_top_y': 2.0*ry_ratio, 'base_cyl_r_x': 2.0*rx_ratio, 'base_cyl_r_y': 2.0*ry_ratio, 'base_cyl_h': 1.5, 'main_cyl_r_x': 0.5*rx_ratio, 'main_cyl_r_y': 0.5*ry_ratio, 'main_cyl_h': 6.0},
+        'C': {'pos': [dist, -dist], 'foundation_r_bottom_x': 2.5*rx_ratio, 'foundation_r_bottom_y': 2.5*ry_ratio, 'foundation_r_top_x': 2.0*rx_ratio, 'foundation_r_top_y': 2.0*ry_ratio, 'base_cyl_r_x': 2.0*rx_ratio, 'base_cyl_r_y': 2.0*ry_ratio, 'base_cyl_h': 1.5, 'main_cyl_r_x': 0.5*rx_ratio, 'main_cyl_r_y': 0.5*ry_ratio, 'main_cyl_h': 6.0},
+        'D': {'pos': [-dist, -dist], 'foundation_r_bottom_x': 2.5*rx_ratio, 'foundation_r_bottom_y': 2.5*ry_ratio, 'foundation_r_top_x': 2.0*rx_ratio, 'foundation_r_top_y': 2.0*ry_ratio, 'base_cyl_r_x': 2.0*rx_ratio, 'base_cyl_r_y': 2.0*ry_ratio, 'base_cyl_h': 1.5, 'main_cyl_r_x': 0.5*rx_ratio, 'main_cyl_r_y': 0.5*ry_ratio, 'main_cyl_h': 6.0},
     }
+    return config
 
 # --- メインアプリケーション ---
 init_session_state()
@@ -153,7 +143,7 @@ pillar_volumes = {}
 for pillar_id, config in pillars_config.items():
     x, y = config['pos']
     z_off = st.session_state.pillar_offsets.get(pillar_id, 0.0)
-    total_h = config['base_cyl_h'] + config['main_cyl_h']
+    total_h = config['base_cyl_h'] + config['main_cyl_h'] # foundation height is not included here for positioning
     init_z = get_plane_z(x, y) - (total_h * 4/5)
     
     # パーツの位置を計算
@@ -164,18 +154,24 @@ for pillar_id, config in pillars_config.items():
     main_pos = [x, y, main_pos_z]
     
     # --- 新しい基礎柱（計算対象）---
-    foundation_verts, foundation_faces = create_slanted_foundation_mesh([x, y, 0], config['base_cyl_r'], base_pos_z, get_plane_z)
+    foundation_verts, foundation_faces = create_slanted_elliptical_frustum_mesh(
+        [x, y, 0], 
+        config['foundation_r_bottom_x'], config['foundation_r_bottom_y'],
+        config['foundation_r_top_x'], config['foundation_r_top_y'],
+        base_pos_z, 
+        get_plane_z
+    )
     fig.add_trace(go.Mesh3d(x=foundation_verts[:,0], y=foundation_verts[:,1], z=foundation_verts[:,2], i=foundation_faces[:,0],j=foundation_faces[:,1],k=foundation_faces[:,2], color='limegreen', opacity=0.3, name=f"Foundation {pillar_id}"))
     
     # --- 埋設体積を計算 ---
     pillar_volumes[pillar_id] = calculate_buried_volume([foundation_verts], get_plane_z)
 
     # --- 土台円柱 ---
-    verts, faces = create_cylinder_mesh(base_pos, config['base_cyl_r'], config['base_cyl_h'])
+    verts, faces = create_elliptical_cylinder_mesh(base_pos, config['base_cyl_r_x'], config['base_cyl_r_y'], config['base_cyl_h'])
     fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='darkgrey'))
     
     # --- メイン円柱 ---
-    verts, faces = create_cylinder_mesh(main_pos, config['main_cyl_r'], config['main_cyl_h'])
+    verts, faces = create_elliptical_cylinder_mesh(main_pos, config['main_cyl_r_x'], config['main_cyl_r_y'], config['main_cyl_h'])
     fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='lightslategray'))
     
     # 上部の赤い線
