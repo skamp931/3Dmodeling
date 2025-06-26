@@ -2,210 +2,217 @@ import streamlit as st
 import plotly.graph_objects as go
 import numpy as np
 from scipy.spatial import Delaunay
+from streamlit_plotly_events import plotly_events
+import pandas as pd
 
 # --- Streamlitページの基本設定 ---
-st.set_page_config(layout="wide", page_title="Advanced 3D Viewer")
+st.set_page_config(layout="wide", page_title="Custom 3D Builder")
 
 # --- セッション状態の初期化 ---
-# st.session_state を使うと、ウィジェットを操作しても変数の値が保持されます。
 def init_session_state():
-    if 'lines' not in st.session_state:
-        st.session_state.lines = []
-    # 物体の初期Z座標オフセット（敷地に埋まるように調整）
-    if 'object_z_offset' not in st.session_state:
-        st.session_state.object_z_offset = -2.5
-    # 計測結果を保持
-    if 'measurement' not in st.session_state:
-        st.session_state.measurement = None
-    # 埋設体積を保持
-    if 'buried_volume' not in st.session_state:
-        st.session_state.buried_volume = None
+    if 'lines' not in st.session_state: st.session_state.lines = []
+    if 'drawing_points' not in st.session_state: st.session_state.drawing_points = []
+    if 'drawing_mode' not in st.session_state: st.session_state.drawing_mode = False
+    if 'pillar_offsets' not in st.session_state:
+        st.session_state.pillar_offsets = {'A': 0.0, 'B': 0.0, 'C': 0.0, 'D': 0.0}
+    if 'data_source' not in st.session_state:
+        st.session_state.data_source = "デフォルト設定"
+    # 現在選択されているモデル名を保存
+    if 'selected_model' not in st.session_state:
+        st.session_state.selected_model = "Model A"
 
-init_session_state()
+def reset_scene_state():
+    """柱の高さや描画線をリセットする"""
+    st.session_state.pillar_offsets = {'A': 0.0, 'B': 0.0, 'C': 0.0, 'D': 0.0}
+    st.session_state.lines = []
+    st.session_state.drawing_points = []
 
-# --- 定数と平面関数の定義 ---
-# 敷地となる平面の方程式 z = ax + by + c
-PLANE_EQ = {'a': 0.1, 'b': -0.05, 'c': 0}
+# --- 3Dデータを作成・計算する関数 ---
+def get_plane_z(x, y, slope_degrees=30):
+    slope_rad = np.deg2rad(slope_degrees)
+    return y * np.tan(slope_rad)
 
-def get_plane_z(x, y):
-    """指定されたx, y座標に対する平面の高さを返す"""
-    return PLANE_EQ['a'] * x + PLANE_EQ['b'] * y + PLANE_EQ['c']
-
-# --- 3Dデータを作成する関数 ---
-
-def create_site_mesh():
-    """斜めの敷地のメッシュデータを作成"""
-    points_2d = np.random.uniform(-15, 15, size=(200, 2))
+def create_mesh_from_vertices(vertices):
+    points_2d = vertices[:, :2]
     tri = Delaunay(points_2d)
-    z = get_plane_z(points_2d[:, 0], points_2d[:, 1])
-    site_points_3d = np.c_[points_2d[:, 0], points_2d[:, 1], z]
-    return site_points_3d, tri.simplices
+    return vertices, tri.simplices
 
-def create_object_mesh(z_offset=0.0):
-    """物体のメッシュデータ（立方体）を作成"""
-    # === エラー修正箇所 ===
-    # 頂点座標を整数(int)から小数(float)で定義します。例: -1 -> -1.0
-    base_vertices = np.array([
-        [-1.0, -1.0, -1.0], [1.0, -1.0, -1.0], [1.0, 1.0, -1.0], [-1.0, 1.0, -1.0],
-        [-1.0, -1.0, 1.0], [1.0, -1.0, 1.0], [1.0, 1.0, 1.0], [-1.0, 1.0, 1.0]
-    ])
-    # サイズを2倍にし、指定されたオフセットでZ位置を調整
-    vertices = base_vertices * 2
-    # これで float型の配列に float型の値を加算できるようになり、エラーが解消されます
-    vertices[:, 2] += z_offset
-    
-    faces = np.array([
-        [0, 1, 2], [0, 2, 3], [4, 5, 6], [4, 6, 7], [0, 1, 5], 
-        [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], 
-        [3, 0, 4], [3, 4, 7]
-    ])
-    return vertices, faces
+def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
+    theta = np.linspace(0, 2 * np.pi, n_segments)
+    x, y = radius * np.cos(theta), radius * np.sin(theta)
+    verts = np.array([[x[i], y[i], 0] for i in range(n_segments)] + [[x[i], y[i], height] for i in range(n_segments)], dtype=float) + np.array(center_pos, dtype=float)
+    faces = []
+    for i in range(n_segments):
+        i_next = (i + 1) % n_segments
+        faces.extend([[i, i_next, i_next + n_segments], [i, i_next + n_segments, i + n_segments]])
+    return verts, np.array(faces)
 
-def calculate_buried_volume(object_vertices, plane_func, samples=50000):
-    """モンテカルロ法で埋設体積を概算する"""
-    min_coords = object_vertices.min(axis=0)
-    max_coords = object_vertices.max(axis=0)
-    
-    dims = max_coords - min_coords
-    total_volume = dims[0] * dims[1] * dims[2]
-    if total_volume == 0:
-        return 0
+def create_frustum_mesh(center_pos, bottom_radius, top_radius, height, n_segments=32):
+    theta = np.linspace(0, 2 * np.pi, n_segments)
+    xb, yb = bottom_radius * np.cos(theta), bottom_radius * np.sin(theta)
+    xt, yt = top_radius * np.cos(theta), top_radius * np.sin(theta)
+    verts = np.array([[xb[i], yb[i], 0] for i in range(n_segments)] + [[xt[i], yt[i], height] for i in range(n_segments)], dtype=float) + np.array(center_pos, dtype=float)
+    faces = []
+    for i in range(n_segments):
+        i_next = (i + 1) % n_segments
+        faces.extend([[i, i_next, i_next + n_segments], [i, i_next + n_segments, i + n_segments]])
+    return verts, np.array(faces)
 
-    # 物体のバウンディングボックス内にランダムな点を生成
-    random_points = np.random.rand(samples, 3) * dims + min_coords
-    
-    # 点が平面の下にあるかどうかをチェック
+def calculate_buried_volume_for_one_pillar(buried_components_verts, plane_func, samples=5000):
+    if not buried_components_verts: return 0
+    all_vertices = np.vstack(buried_components_verts)
+    min_c, max_c = all_vertices.min(axis=0), all_vertices.max(axis=0)
+    dims, bbox_volume = max_c - min_c, np.prod(max_c - min_c)
+    if bbox_volume == 0: return 0
+    random_points = np.random.rand(samples, 3) * dims + min_c
     plane_z_at_points = plane_func(random_points[:, 0], random_points[:, 1])
-    buried_mask = random_points[:, 2] < plane_z_at_points
+    is_below_plane = random_points[:, 2] < plane_z_at_points
+    return bbox_volume * (np.sum(is_below_plane) / samples)
+
+# --- データ定義 ---
+def get_default_site_data():
+    x = np.linspace(-10, 10, 20); y = np.linspace(-10, 10, 20)
+    xv, yv = np.meshgrid(x, y)
+    z = get_plane_z(xv, yv)
+    return np.c_[xv.ravel(), yv.ravel(), z.ravel()]
+
+def get_predefined_pillar_models():
+    dist = 7.0 / 2.0
+    base = {'pos': [-dist, dist], 'frustum_r_bottom': 2.5}
+    models = {
+        "Model A (標準)": {
+            'A': {**base, 'frustum_h': 2.0, 'base_cyl_h': 1.0, 'main_cyl_h': 5.0, 'frustum_r_top': 0.5, 'base_cyl_r': 0.5, 'main_cyl_r': 0.25},
+            'B': {**base, 'pos': [dist, dist], 'frustum_h': 2.0, 'base_cyl_h': 1.0, 'main_cyl_h': 5.0, 'frustum_r_top': 0.5, 'base_cyl_r': 0.5, 'main_cyl_r': 0.25},
+            'C': {**base, 'pos': [dist, -dist], 'frustum_h': 2.0, 'base_cyl_h': 1.0, 'main_cyl_h': 5.0, 'frustum_r_top': 0.5, 'base_cyl_r': 0.5, 'main_cyl_r': 0.25},
+            'D': {**base, 'pos': [-dist, -dist], 'frustum_h': 2.0, 'base_cyl_h': 1.0, 'main_cyl_h': 5.0, 'frustum_r_top': 0.5, 'base_cyl_r': 0.5, 'main_cyl_r': 0.25},
+        },
+        "Model B (背高)": {
+            'A': {**base, 'frustum_h': 3.0, 'base_cyl_h': 1.5, 'main_cyl_h': 8.0, 'frustum_r_top': 0.4, 'base_cyl_r': 0.4, 'main_cyl_r': 0.2},
+            'B': {**base, 'pos': [dist, dist], 'frustum_h': 3.0, 'base_cyl_h': 1.5, 'main_cyl_h': 8.0, 'frustum_r_top': 0.4, 'base_cyl_r': 0.4, 'main_cyl_r': 0.2},
+            'C': {**base, 'pos': [dist, -dist], 'frustum_h': 3.0, 'base_cyl_h': 1.5, 'main_cyl_h': 8.0, 'frustum_r_top': 0.4, 'base_cyl_r': 0.4, 'main_cyl_r': 0.2},
+            'D': {**base, 'pos': [-dist, -dist], 'frustum_h': 3.0, 'base_cyl_h': 1.5, 'main_cyl_h': 8.0, 'frustum_r_top': 0.4, 'base_cyl_r': 0.4, 'main_cyl_r': 0.2},
+        },
+        "Model C (寸胴)": {
+            'A': {**base, 'frustum_r_bottom': 3.0, 'frustum_h': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0, 'frustum_r_top': 1.5, 'base_cyl_r': 1.5, 'main_cyl_r': 1.0},
+            'B': {**base, 'pos': [dist, dist], 'frustum_r_bottom': 3.0, 'frustum_h': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0, 'frustum_r_top': 1.5, 'base_cyl_r': 1.5, 'main_cyl_r': 1.0},
+            'C': {**base, 'pos': [dist, -dist], 'frustum_r_bottom': 3.0, 'frustum_h': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0, 'frustum_r_top': 1.5, 'base_cyl_r': 1.5, 'main_cyl_r': 1.0},
+            'D': {**base, 'pos': [-dist, -dist], 'frustum_r_bottom': 3.0, 'frustum_h': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0, 'frustum_r_top': 1.5, 'base_cyl_r': 1.5, 'main_cyl_r': 1.0},
+        }
+    }
+    return models
+
+def create_pillar_config_from_df(df):
+    """Pandas DataFrameから柱の設定辞書を生成する"""
+    config = {}
+    try:
+        # 'id'列をインデックスとして設定
+        df.set_index('id', inplace=True)
+        # 各行を辞書に変換
+        for pillar_id, row in df.iterrows():
+            config[pillar_id] = {
+                'pos': [row['x'], row['y']],
+                'frustum_h': row['frustum_h'],
+                'base_cyl_h': row['base_cyl_h'],
+                'main_cyl_h': row['main_cyl_h'],
+                'frustum_r_bottom': row['frustum_r_bottom'],
+                'frustum_r_top': row['frustum_r_top'],
+                'base_cyl_r': row['base_cyl_r'],
+                'main_cyl_r': row['main_cyl_r'],
+            }
+        return config
+    except Exception as e:
+        st.error(f"柱CSVファイルの形式が正しくありません: {e}")
+        return None
+
+# --- サイドバーUI ---
+init_session_state()
+st.sidebar.title("🛠️ 設定とツール")
+st.sidebar.subheader("1. データソース")
+data_source_changed = st.sidebar.radio("表示するデータを選択", ["デフォルト設定", "ファイルから読み込み"], key="data_source_radio", on_change=reset_scene_state)
+
+site_vertices = None
+pillars_config = None
+
+if st.session_state.data_source == "ファイルから読み込み":
+    st.sidebar.info("CSVファイルをアップロードしてください。")
+    uploaded_site_file = st.sidebar.file_uploader("敷地データ (site.csv)", type="csv")
+    uploaded_pillars_file = st.sidebar.file_uploader("柱データ (pillars.csv)", type="csv")
     
-    # 埋まっている点の割合から体積を計算
-    buried_ratio = np.sum(buried_mask) / samples
-    return total_volume * buried_ratio
+    site_vertices = get_default_site_data() # デフォルト敷地をフォールバックとして使用
+    if uploaded_site_file:
+        df = pd.read_csv(uploaded_site_file)
+        if {'x', 'y', 'z'}.issubset(df.columns):
+            site_vertices = df[['x', 'y', 'z']].values
+        else:
+            st.error("敷地ファイルに 'x', 'y', 'z' 列が必要です。")
 
-# --- メインのアプリケーション部分 ---
-st.title("高機能3Dビューア")
+    if uploaded_pillars_file:
+        df = pd.read_csv(uploaded_pillars_file)
+        pillars_config = create_pillar_config_from_df(df)
+    else:
+        st.warning("柱データがアップロードされていません。デフォルトモデルを表示します。")
+        pillars_config = get_predefined_pillar_models()["Model A (標準)"]
 
-# --- サイドバーのUI ---
-st.sidebar.title("🛠️ ツール")
-
-# セクション1: 物体の操作と体積計算
-with st.sidebar.expander("📦 物体コントロール", expanded=True):
-    st.write("ボタンで物体を上下に移動できます。")
-    col1, col2, col3 = st.columns([1,1,1.5])
-    if col1.button("⬆️ 上へ"):
-        st.session_state.object_z_offset += 0.5
-        st.session_state.buried_volume = None  # 移動したら体積をリセット
-    if col2.button("⬇️ 下へ"):
-        st.session_state.object_z_offset -= 0.5
-        st.session_state.buried_volume = None
-
-    if col3.button("🔄 位置リセット"):
-        st.session_state.object_z_offset = -2.5
-        st.session_state.buried_volume = None
-
-    st.write("---")
-    if st.button("埋設体積を計算", key="calc_vol"):
-        verts, _ = create_object_mesh(st.session_state.object_z_offset)
-        volume = calculate_buried_volume(verts, get_plane_z)
-        st.session_state.buried_volume = volume
+else: # デフォルト設定
+    models = get_predefined_pillar_models()
+    # モデル選択のUI
+    selected_model = st.sidebar.selectbox("柱のモデルを選択", options=list(models.keys()), key="model_select")
     
-    if st.session_state.buried_volume is not None:
-        st.metric("埋設部分の体積 (概算)", f"{st.session_state.buried_volume:.2f} m³")
+    # モデルが変更されたら状態をリセット
+    if selected_model != st.session_state.selected_model:
+        st.session_state.selected_model = selected_model
+        reset_scene_state()
+        st.rerun()
 
+    pillars_config = models[st.session_state.selected_model]
+    site_vertices = get_default_site_data()
 
-# セクション2: 線の追加
-with st.sidebar.expander("📏 線を追加", expanded=False):
-    st.write("始点と終点の座標を入力して線を追加します。")
-    col1, col2 = st.columns(2)
-    with col1:
-        x1 = st.number_input("X (始点)", -20.0, 20.0, 0.0, 1.0, key="x1")
-        y1 = st.number_input("Y (始点)", -20.0, 20.0, -8.0, 1.0, key="y1")
-        z1 = st.number_input("Z (始点)", -20.0, 20.0, 5.0, 1.0, key="z1")
-    with col2:
-        x2 = st.number_input("X (終点)", -20.0, 20.0, 8.0, 1.0, key="x2")
-        y2 = st.number_input("Y (終点)", -20.0, 20.0, -8.0, 1.0, key="y2")
-        z2 = st.number_input("Z (終点)", -20.0, 20.0, 0.0, 1.0, key="z2")
+st.sidebar.subheader("2. 描画ツール")
+with st.sidebar.expander("✏️ 画面上で線を描画", expanded=True):
+    st.session_state.drawing_mode = st.toggle("描画モードを有効にする", value=st.session_state.drawing_mode)
+    if st.button("全ての描画線を削除"): st.session_state.lines, st.session_state.drawing_points = [], []; st.rerun()
 
-    if st.button("線を追加"):
-        st.session_state.lines.append({"start": [x1, y1, z1], "end": [x2, y2, z2]})
-    if st.button("全ての線を削除"):
-        st.session_state.lines = []
+# --- メイン画面 ---
+st.title("カスタム3Dビルダー")
+if pillars_config:
+    st.subheader("各脚の操作と埋設体積")
+    cols = st.columns(len(pillars_config))
+    for i, (pillar_id, config) in enumerate(pillars_config.items()):
+        with cols[i]:
+            st.markdown(f"**{pillar_id}脚**")
+            if st.button(f"⬆️##{pillar_id}",use_container_width=True): st.session_state.pillar_offsets[pillar_id]+=0.5; st.rerun()
+            if st.button(f"⬇️##{pillar_id}",use_container_width=True): st.session_state.pillar_offsets[pillar_id]-=0.5; st.rerun()
+            x, y = config['pos']; z_off = st.session_state.pillar_offsets[pillar_id]
+            total_h = config['frustum_h']+config['base_cyl_h']+config['main_cyl_h']
+            init_z = get_plane_z(x,y) - (total_h*4/5)
+            f_pos=[x,y,init_z+z_off]; b_pos=[f_pos[0],f_pos[1],f_pos[2]+config['frustum_h']]
+            v1,_=create_frustum_mesh(f_pos, config['frustum_r_bottom'], config['frustum_r_top'], config['frustum_h'])
+            v2,_=create_cylinder_mesh(b_pos, config['base_cyl_r'], config['base_cyl_h'])
+            vol=calculate_buried_volume_for_one_pillar([v1,v2], get_plane_z)
+            st.metric(f"埋設体積",f"{vol:.2f} m³",key=f"vol_{pillar_id}")
 
-
-# セクション3: 距離の計測
-with st.sidebar.expander("📐 2点間の距離を計測", expanded=False):
-    col3, col4 = st.columns(2)
-    with col3:
-        xa = st.number_input("X (点1)", -20.0, 20.0, -5.0, 1.0, key="xa")
-        ya = st.number_input("Y (点1)", -20.0, 20.0, -5.0, 1.0, key="ya")
-        za = st.number_input("Z (点1)", -20.0, 20.0, 0.0, 1.0, key="za")
-    with col4:
-        xb = st.number_input("X (点2)", -20.0, 20.0, 5.0, 1.0, key="xb")
-        yb = st.number_input("Y (点2)", -20.0, 20.0, 5.0, 1.0, key="yb")
-        zb = st.number_input("Z (点2)", -20.0, 20.0, 4.0, 1.0, key="zb")
-
-    if st.button("距離を計算"):
-        p1 = np.array([xa, ya, za]); p2 = np.array([xb, yb, zb])
-        dist = np.linalg.norm(p1 - p2)
-        st.session_state.measurement = {"p1": p1, "p2": p2, "dist": dist}
-    
-    if st.session_state.measurement:
-        st.metric("計測距離", f"{st.session_state.measurement['dist']:.2f}")
-
-
-# --- 3Dグラフの描画 ---
+# --- 3Dグラフ描画 ---
 fig = go.Figure()
+if site_vertices is not None:
+    v,f=create_mesh_from_vertices(site_vertices); fig.add_trace(go.Mesh3d(x=v[:,0],y=v[:,1],z=v[:,2],i=f[:,0],j=f[:,1],k=f[:,2],color='burlywood',opacity=0.7))
+if pillars_config:
+    for pillar_id,config in pillars_config.items():
+        x,y=config['pos']; z_off=st.session_state.pillar_offsets[pillar_id]; total_h=config['frustum_h']+config['base_cyl_h']+config['main_cyl_h']
+        init_z=get_plane_z(x,y)-(total_h*4/5)
+        f_pos=[x,y,init_z+z_off]; b_pos=[f_pos[0],f_pos[1],f_pos[2]+config['frustum_h']]; m_pos=[b_pos[0],b_pos[1],b_pos[2]+config['base_cyl_h']]
+        l_s=[m_pos[0],m_pos[1],m_pos[2]+config['main_cyl_h']]; l_e=[l_s[0],l_s[1],l_s[2]+1.5]
+        v,f=create_frustum_mesh(f_pos,config['frustum_r_bottom'],config['frustum_r_top'],config['frustum_h']); fig.add_trace(go.Mesh3d(x=v[:,0],y=v[:,1],z=v[:,2],i=f[:,0],j=f[:,1],k=f[:,2],color='gray'))
+        v,f=create_cylinder_mesh(b_pos,config['base_cyl_r'],config['base_cyl_h']); fig.add_trace(go.Mesh3d(x=v[:,0],y=v[:,1],z=v[:,2],i=f[:,0],j=f[:,1],k=f[:,2],color='darkgrey'))
+        v,f=create_cylinder_mesh(m_pos,config['main_cyl_r'],config['main_cyl_h']); fig.add_trace(go.Mesh3d(x=v[:,0],y=v[:,1],z=v[:,2],i=f[:,0],j=f[:,1],k=f[:,2],color='lightslategray'))
+        fig.add_trace(go.Scatter3d(x=[l_s[0],l_e[0]],y=[l_s[1],l_e[1]],z=[l_s[2],l_e[2]],mode='lines',line=dict(color='red',width=7)))
+if st.session_state.drawing_points: fig.add_trace(go.Scatter3d(x=[st.session_state.drawing_points[0]['x']],y=[st.session_state.drawing_points[0]['y']],z=[st.session_state.drawing_points[0]['z']],mode='markers',marker=dict(color='magenta',size=10,symbol='cross')))
+for line in st.session_state.lines: fig.add_trace(go.Scatter3d(x=[line["start"]['x'],line["end"]['x']],y=[line["start"]['y'],line["end"]['y']],z=[line["start"]['z'],line["end"]['z']],mode='lines',line=dict(color='cyan',width=5)))
+fig.update_layout(scene=dict(xaxis=dict(title='X (m)',range=[-10,10]),yaxis=dict(title='Y (m)',range=[-10,10]),zaxis=dict(title='Z (m)',range=[-10,10]),aspectratio=dict(x=1,y=1,z=1)),margin=dict(l=0,r=0,b=0,t=5),showlegend=False)
 
-# データを作成
-site_vertices, site_faces = create_site_mesh()
-object_vertices, object_faces = create_object_mesh(st.session_state.object_z_offset)
+selected_points=plotly_events(fig,click_event=True,key="plotly_click")
+if selected_points and st.session_state.drawing_mode:
+    p=selected_points[0]
+    if not st.session_state.drawing_points: st.session_state.drawing_points.append(p)
+    else: st.session_state.lines.append({"start":st.session_state.drawing_points.pop(0),"end":p})
+    st.rerun()
 
-# 1. 敷地
-fig.add_trace(go.Mesh3d(x=site_vertices[:,0], y=site_vertices[:,1], z=site_vertices[:,2],
-    i=site_faces[:,0], j=site_faces[:,1], k=site_faces[:,2],
-    color='lightgreen', opacity=0.7, name='敷地', hoverinfo='none'))
-
-# 2. 物体
-fig.add_trace(go.Mesh3d(x=object_vertices[:,0], y=object_vertices[:,1], z=object_vertices[:,2],
-    i=object_faces[:,0], j=object_faces[:,1], k=object_faces[:,2],
-    color='royalblue', opacity=1.0, name='物体', hoverinfo='none'))
-
-# 3. 追加された線と座標を表示
-for i, line in enumerate(st.session_state.lines):
-    start, end = line["start"], line["end"]
-    fig.add_trace(go.Scatter3d(x=[start[0], end[0]], y=[start[1], end[1]], z=[start[2], end[2]],
-        mode='lines', line=dict(color='red', width=5), name=f'追加線{i+1}'))
-    # 座標ラベルを追加
-    fig.add_trace(go.Scatter3d(x=[start[0], end[0]], y=[start[1], end[1]], z=[start[2], end[2]],
-        mode='text', text=[f"({p[0]:.1f}, {p[1]:.1f}, {p[2]:.1f})" for p in [start, end]],
-        textfont=dict(color="darkred", size=10), textposition='middle right', hoverinfo='none'))
-
-# 4. 計測した距離を表示
-if st.session_state.measurement:
-    m = st.session_state.measurement
-    p1, p2, dist = m['p1'], m['p2'], m['dist']
-    mid_point = (p1 + p2) / 2
-    # 計測線
-    fig.add_trace(go.Scatter3d(x=[p1[0], p2[0]], y=[p1[1], p2[1]], z=[p1[2], p2[2]],
-        mode='lines', line=dict(color='orange', width=7, dash='dash'), name='計測線'))
-    # 距離ラベル
-    fig.add_trace(go.Scatter3d(x=[mid_point[0]], y=[mid_point[1]], z=[mid_point[2]],
-        mode='text', text=[f"距離: {dist:.2f}"],
-        textfont=dict(color="orange", size=12), hoverinfo='none'))
-
-
-# グラフのレイアウト設定
-fig.update_layout(
-    title_text='インタラクティブ3Dビューア',
-    scene=dict(
-        xaxis=dict(title='X軸', range=[-15, 15]),
-        yaxis=dict(title='Y軸', range=[-15, 15]),
-        zaxis=dict(title='Z軸 (高さ)', range=[-10, 15]),
-        aspectratio=dict(x=1, y=1, z=0.5),
-        camera_eye=dict(x=1.8, y=1.8, z=1.2)
-    ),
-    margin=dict(l=0, r=0, b=0, t=40),
-    showlegend=False
-)
-
-st.plotly_chart(fig, use_container_width=True, height=700)
