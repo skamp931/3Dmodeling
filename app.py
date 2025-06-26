@@ -58,7 +58,7 @@ def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
 
 def calculate_buried_volume(verts_list, plane_func, samples=5000):
     """与えられた頂点群の埋設体積を計算する"""
-    if not verts_list: return 0
+    if not verts_list or len(verts_list[0]) == 0: return 0
     all_vertices = np.vstack(verts_list)
     min_c, max_c = all_vertices.min(axis=0), all_vertices.max(axis=0)
     dims, bbox_volume = max_c - min_c, np.prod(max_c - min_c)
@@ -134,20 +134,13 @@ for pillar_id, config in pillars_config.items():
             vertex_colors_base.append('limegreen') # 計算対象の地上部分の色
     fig.add_trace(go.Mesh3d(x=base_verts[:,0],y=base_verts[:,1],z=base_verts[:,2],i=base_faces[:,0],j=base_faces[:,1],k=base_faces[:,2],vertexcolor=vertex_colors_base, name=f"Base {pillar_id}"))
     
-    # --- メイン円柱（計算対象＆色分け） ---
-    main_verts, main_faces = create_cylinder_mesh(main_pos, config['main_cyl_r'], config['main_cyl_h'])
-    vertex_colors_main = []
-    for v in main_verts:
-        site_z = get_plane_z(v[0], v[1])
-        if v[2] < site_z:
-            vertex_colors_main.append('sienna') # 埋設部分の色
-        else:
-            vertex_colors_main.append('limegreen') # 計算対象の地上部分の色
-    fig.add_trace(go.Mesh3d(x=main_verts[:,0],y=main_verts[:,1],z=main_verts[:,2],i=main_faces[:,0],j=main_faces[:,1],k=main_faces[:,2],vertexcolor=vertex_colors_main, name=f"Main {pillar_id}"))
-    
-    # --- 埋設体積を計算（ベースとメインの両方を対象） ---
-    pillar_volumes[pillar_id] = calculate_buried_volume([base_verts, main_verts], get_plane_z)
+    # --- 埋設体積を計算（ベース部分のみ対象） ---
+    pillar_volumes[pillar_id] = calculate_buried_volume([base_verts], get_plane_z)
 
+    # --- メイン円柱（計算対象外、常に一定の色） ---
+    main_verts, main_faces = create_cylinder_mesh(main_pos, config['main_cyl_r'], config['main_cyl_h'])
+    fig.add_trace(go.Mesh3d(x=main_verts[:,0],y=main_verts[:,1],z=main_verts[:,2],i=main_faces[:,0],j=main_faces[:,1],k=main_faces[:,2],color='lightslategray', name=f"Main {pillar_id}"))
+    
     # 上部の赤い線を描画
     line_start = [main_pos[0], main_pos[1], main_pos[2] + config['main_cyl_h']]
     line_end = [line_start[0], line_start[1], line_start[2] + 1.5]
@@ -180,7 +173,7 @@ for col, pillar_id in zip(cols, pillars_config.keys()):
         st.markdown(f"**{pillar_id}脚**")
         
         # 体積の表示
-        st.markdown("埋設体積（柱全体）")
+        st.markdown("埋設体積（土台部分）")
         st.subheader(f"{pillar_volumes.get(pillar_id, 0):.2f} m³")
 
         # 上下ボタン
