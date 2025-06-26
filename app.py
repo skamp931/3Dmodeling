@@ -30,8 +30,8 @@ def create_mesh_from_vertices(vertices):
         st.error(f"メッシュの生成に失敗しました: {e}")
         return np.array([]), np.array([])
 
-def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
-    """円柱の頂点と面データを生成する"""
+def create_circular_cylinder_mesh(center_pos, radius, height, n_segments=32):
+    """【修正版】円柱の頂点と面データを生成する"""
     theta = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
     x_c = radius * np.cos(theta)
     y_c = radius * np.sin(theta)
@@ -57,8 +57,8 @@ def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
         
     return verts, np.array(faces, dtype=int)
 
-def create_slanted_frustum_mesh(center_pos, bottom_radius, top_radius, top_z, plane_func, n_segments=32):
-    """敷地面に沿った円錐台のメッシュを生成する"""
+def create_circular_slanted_frustum_mesh(center_pos, bottom_radius, top_radius, top_z, plane_func, n_segments=32):
+    """【修正版】敷地面に沿った円錐台のメッシュを生成する"""
     theta = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
     
     verts = []
@@ -153,7 +153,7 @@ for pillar_id, config in pillars_config.items():
     main_pos = [x, y, main_pos_z]
     
     # --- 新しい基礎柱（計算対象）---
-    foundation_verts, foundation_faces = create_slanted_frustum_mesh(
+    foundation_verts, foundation_faces = create_circular_slanted_frustum_mesh(
         [x, y, 0], 
         config['foundation_r_bottom'],
         config['foundation_r_top'],
@@ -166,11 +166,11 @@ for pillar_id, config in pillars_config.items():
     pillar_volumes[pillar_id] = calculate_buried_volume([foundation_verts], get_plane_z)
 
     # --- 土台円柱 ---
-    verts, faces = create_cylinder_mesh(base_pos, config['base_cyl_r'], config['base_cyl_h'])
+    verts, faces = create_circular_cylinder_mesh(base_pos, config['base_cyl_r'], config['base_cyl_h'])
     fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='darkgrey'))
     
     # --- メイン円柱 ---
-    verts, faces = create_cylinder_mesh(main_pos, config['main_cyl_r'], config['main_cyl_h'])
+    verts, faces = create_circular_cylinder_mesh(main_pos, config['main_cyl_r'], config['main_cyl_h'])
     fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='lightslategray'))
     
     # 上部の赤い線
