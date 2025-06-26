@@ -113,7 +113,7 @@ def get_default_site_data():
 def get_default_pillars_config():
     dist = 7.0 / 2.0
     rx_ratio = 1.0
-    ry_ratio = 1.5
+    ry_ratio = 3.0 # この値を1.5から3.0に変更
     config = {
         'A': {'pos': [-dist, dist], 'foundation_r_bottom_x': 2.5*rx_ratio, 'foundation_r_bottom_y': 2.5*ry_ratio, 'foundation_r_top_x': 2.0*rx_ratio, 'foundation_r_top_y': 2.0*ry_ratio, 'base_cyl_r_x': 2.0*rx_ratio, 'base_cyl_r_y': 2.0*ry_ratio, 'base_cyl_h': 1.5, 'main_cyl_r_x': 0.5*rx_ratio, 'main_cyl_r_y': 0.5*ry_ratio, 'main_cyl_h': 6.0},
         'B': {'pos': [dist, dist], 'foundation_r_bottom_x': 2.5*rx_ratio, 'foundation_r_bottom_y': 2.5*ry_ratio, 'foundation_r_top_x': 2.0*rx_ratio, 'foundation_r_top_y': 2.0*ry_ratio, 'base_cyl_r_x': 2.0*rx_ratio, 'base_cyl_r_y': 2.0*ry_ratio, 'base_cyl_h': 1.5, 'main_cyl_r_x': 0.5*rx_ratio, 'main_cyl_r_y': 0.5*ry_ratio, 'main_cyl_h': 6.0},
