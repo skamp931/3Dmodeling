@@ -12,10 +12,12 @@ def init_session_state():
         st.session_state.pillar_offsets = {'A': 0.0, 'B': 0.0, 'C': 0.0, 'D': 0.0}
 
 # --- 3Dデータを作成・計算する関数 ---
-def get_plane_z(x, y, slope_degrees=30):
+# ▼▼▼【変更点1】敷地の傾斜を20度に変更 ▼▼▼
+def get_plane_z(x, y, slope_degrees=20):
     """指定された傾斜の平面上のZ座標を計算する"""
     slope_rad = np.deg2rad(slope_degrees)
     return y * np.tan(slope_rad)
+# ▲▲▲【変更点1】ここまで ▲▲▲
 
 def create_mesh_from_vertices(vertices):
     """頂点データからDelaunay三角形分割を用いてメッシュを生成する"""
@@ -155,12 +157,15 @@ def get_default_site_data():
 def get_default_pillars_config():
     """柱の基本設定を定義する"""
     dist = 7.0 / 2.0; top_r = 1.0; bottom_r = top_r * 3.0
+    # ▼▼▼【変更点2】円錐台の高さを5.0mに変更 ▼▼▼
+    foundation_height = 5.0
     return {
-        'A': {'pos': [-dist, dist], 'foundation_h': 3.0, 'foundation_r_bottom': bottom_r, 'foundation_r_top': top_r, 'base_cyl_r': top_r, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
-        'B': {'pos': [dist, dist], 'foundation_h': 3.0, 'foundation_r_bottom': bottom_r, 'foundation_r_top': top_r, 'base_cyl_r': top_r, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
-        'C': {'pos': [dist, -dist], 'foundation_h': 3.0, 'foundation_r_bottom': bottom_r, 'foundation_r_top': top_r, 'base_cyl_r': top_r, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
-        'D': {'pos': [-dist, -dist], 'foundation_h': 3.0, 'foundation_r_bottom': bottom_r, 'foundation_r_top': top_r, 'base_cyl_r': top_r, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
+        'A': {'pos': [-dist, dist], 'foundation_h': foundation_height, 'foundation_r_bottom': bottom_r, 'foundation_r_top': top_r, 'base_cyl_r': top_r, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
+        'B': {'pos': [dist, dist], 'foundation_h': foundation_height, 'foundation_r_bottom': bottom_r, 'foundation_r_top': top_r, 'base_cyl_r': top_r, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
+        'C': {'pos': [dist, -dist], 'foundation_h': foundation_height, 'foundation_r_bottom': bottom_r, 'foundation_r_top': top_r, 'base_cyl_r': top_r, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
+        'D': {'pos': [-dist, -dist], 'foundation_h': foundation_height, 'foundation_r_bottom': bottom_r, 'foundation_r_top': top_r, 'base_cyl_r': top_r, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
     }
+    # ▲▲▲【変更点2】ここまで ▲▲▲
 
 # --- メインアプリケーション ---
 init_session_state()
@@ -185,7 +190,6 @@ for pillar_id, config in pillars_config.items():
     init_z = get_plane_z(x, y) - (total_h * 4/5)
     
     foundation_pos_z = init_z + z_off
-    # ▼▼▼【変更点】ベース円柱の開始高さを、円錐台の底面（短円）に合わせる ▼▼▼
     base_pos_z = foundation_pos_z
     main_pos_z = base_pos_z + config['base_cyl_h']
     
@@ -220,7 +224,7 @@ for pillar_id, config in pillars_config.items():
 
 # グラフのレイアウト設定
 fig.update_layout(
-    title_text="敷地と柱の基本表示（円錐台反転・位置調整）",
+    title_text="敷地と柱の基本表示（傾斜20度・円錐台高さ5m）",
     scene=dict(
         xaxis=dict(title='X (m)',range=[-10,10]),
         yaxis=dict(title='Y (m)',range=[-10,10]),
