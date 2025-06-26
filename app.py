@@ -165,7 +165,7 @@ for pillar_id, config in pillars_config.items():
     
     # --- 新しい基礎柱（計算対象）---
     foundation_verts, foundation_faces = create_slanted_foundation_mesh([x, y, 0], config['base_cyl_r'], base_pos_z, get_plane_z)
-    fig.add_trace(go.Mesh3d(x=foundation_verts[:,0], y=foundation_verts[:,1], z=foundation_verts[:,2], i=foundation_faces[:,0],j=foundation_faces[:,1],k=foundation_faces[:,2], color='limegreen', name=f"Foundation {pillar_id}"))
+    fig.add_trace(go.Mesh3d(x=foundation_verts[:,0], y=foundation_verts[:,1], z=foundation_verts[:,2], i=foundation_faces[:,0],j=foundation_faces[:,1],k=foundation_faces[:,2], color='limegreen', opacity=0.3, name=f"Foundation {pillar_id}"))
     
     # --- 埋設体積を計算 ---
     pillar_volumes[pillar_id] = calculate_buried_volume([foundation_verts], get_plane_z)
