@@ -13,6 +13,9 @@ def init_session_state():
     # 柱の上下移動オフセットを管理
     if 'pillar_offsets' not in st.session_state:
         st.session_state.pillar_offsets = {'A': 0.0, 'B': 0.0, 'C': 0.0, 'D': 0.0}
+    # 距離計測の結果を管理
+    if 'measurement' not in st.session_state:
+        st.session_state.measurement = None
 
 # --- 3Dデータを作成する関数 ---
 def get_plane_z(x, y, slope_degrees=30):
@@ -98,6 +101,36 @@ for col, pillar_id in zip(cols, pillars_config.keys()):
         if st.button(f"⬇️##{pillar_id}", use_container_width=True):
             st.session_state.pillar_offsets[pillar_id] -= 0.5
 
+st.divider()
+
+# --- 2点間距離の計測パネル ---
+st.subheader("２点間距離の計測")
+m_cols = st.columns([2, 2, 1, 2])
+with m_cols[0]:
+    st.markdown("**点1**")
+    xa = st.number_input("X座標 (1)", -20.0, 20.0, -5.0, 1.0, key="xa", label_visibility="collapsed")
+    ya = st.number_input("Y座標 (1)", -20.0, 20.0, -5.0, 1.0, key="ya", label_visibility="collapsed")
+    za = st.number_input("Z座標 (1)", -20.0, 20.0, 0.0, 1.0, key="za", label_visibility="collapsed")
+
+with m_cols[1]:
+    st.markdown("**点2**")
+    xb = st.number_input("X座標 (2)", -20.0, 20.0, 5.0, 1.0, key="xb", label_visibility="collapsed")
+    yb = st.number_input("Y座標 (2)", -20.0, 20.0, 5.0, 1.0, key="yb", label_visibility="collapsed")
+    zb = st.number_input("Z座標 (2)", -20.0, 20.0, 4.0, 1.0, key="zb", label_visibility="collapsed")
+
+with m_cols[2]:
+    st.markdown("　") # スペース調整
+    if st.button("距離を計算", use_container_width=True):
+        p1 = np.array([xa, ya, za])
+        p2 = np.array([xb, yb, zb])
+        dist = np.linalg.norm(p1 - p2)
+        st.session_state.measurement = {"p1": p1, "p2": p2, "dist": dist}
+
+with m_cols[3]:
+    if st.session_state.measurement:
+        st.metric("計測距離", f"{st.session_state.measurement['dist']:.2f} m")
+
+st.divider()
 
 # --- 3Dグラフ描画 ---
 fig = go.Figure()
@@ -120,21 +153,31 @@ if pillars_config:
         total_h = config['base_cyl_h'] + config['main_cyl_h']
         init_z = get_plane_z(x, y) - (total_h * 4/5)
         
-        # パーツの位置
         base_pos = [x, y, init_z + z_off]
         main_pos = [base_pos[0], base_pos[1], base_pos[2] + config['base_cyl_h']]
         
-        # パーツのメッシュを生成して描画
         verts, faces = create_cylinder_mesh(base_pos, config['base_cyl_r'], config['base_cyl_h'])
         fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='darkgrey'))
         
         verts, faces = create_cylinder_mesh(main_pos, config['main_cyl_r'], config['main_cyl_h'])
         fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='lightslategray'))
         
-        # 上部の赤い線
         line_start = [main_pos[0], main_pos[1], main_pos[2] + config['main_cyl_h']]
         line_end = [line_start[0], line_start[1], line_start[2] + 1.5]
         fig.add_trace(go.Scatter3d(x=[line_start[0],line_end[0]],y=[line_start[1],line_end[1]],z=[line_start[2],line_end[2]],mode='lines',line=dict(color='red',width=7)))
+
+# 計測線の描画
+if st.session_state.measurement:
+    m = st.session_state.measurement
+    p1, p2, dist = m['p1'], m['p2'], m['dist']
+    mid_point = (p1 + p2) / 2
+    # 計測線
+    fig.add_trace(go.Scatter3d(x=[p1[0], p2[0]], y=[p1[1], p2[1]], z=[p1[2], p2[2]],
+        mode='lines', line=dict(color='orange', width=7, dash='dash'), name='計測線'))
+    # 距離ラベル
+    fig.add_trace(go.Scatter3d(x=[mid_point[0]], y=[mid_point[1]], z=[mid_point[2]],
+        mode='text', text=[f"距離: {dist:.2f}"],
+        textfont=dict(color="orange", size=12), hoverinfo='none'))
 
 # レイアウト設定
 fig.update_layout(
