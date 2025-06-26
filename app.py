@@ -162,40 +162,64 @@ with st.sidebar.expander("✏️ 画面上で線を描画", expanded=True):
     if st.button("全ての描画線を削除"): st.session_state.lines, st.session_state.drawing_points = [], []; st.rerun()
 
 st.title("カスタム3Dビルダー")
+
+# === メイン画面の操作パネル (エラー修正箇所) ===
 if pillars_config:
     st.subheader("各脚の操作と埋設体積")
     cols = st.columns(len(pillars_config))
-    for i, (pillar_id, config) in enumerate(cols):
-        with config:
+    # zipを使って、UIの列と柱のデータを正しく組み合わせる
+    for col, (pillar_id, config) in zip(cols, pillars_config.items()):
+        with col:
             st.markdown(f"**{pillar_id}脚**")
             if st.button(f"⬆️##{pillar_id}",use_container_width=True): st.session_state.pillar_offsets[pillar_id]+=0.5; st.rerun()
             if st.button(f"⬇️##{pillar_id}",use_container_width=True): st.session_state.pillar_offsets[pillar_id]-=0.5; st.rerun()
-            x,y=pillars_config[pillar_id]['pos']; z_off=st.session_state.pillar_offsets[pillar_id]
-            cfg = pillars_config[pillar_id]
-            total_h=cfg['frustum_h']+cfg['base_cyl_h']+cfg['main_cyl_h']
+            
+            x,y=config['pos']; z_off=st.session_state.pillar_offsets[pillar_id]
+            total_h=config['frustum_h']+config['base_cyl_h']+config['main_cyl_h']
             init_z=get_plane_z(x,y)-(total_h*4/5)
-            f_pos=[x,y,init_z+z_off]; b_pos=[f_pos[0],f_pos[1],f_pos[2]+cfg['frustum_h']]
-            v1,_=create_frustum_mesh(f_pos,cfg['frustum_r_bottom'],cfg['frustum_r_top'],cfg['frustum_h'])
-            v2,_=create_cylinder_mesh(b_pos,cfg['base_cyl_r'],cfg['base_cyl_h'])
+            f_pos=[x,y,init_z+z_off]; b_pos=[f_pos[0],f_pos[1],f_pos[2]+config['frustum_h']]
+            
+            v1,_=create_frustum_mesh(f_pos,config['frustum_r_bottom'],config['frustum_r_top'],config['frustum_h'])
+            v2,_=create_cylinder_mesh(b_pos,config['base_cyl_r'],config['base_cyl_h'])
             vol=calculate_buried_volume_for_one_pillar([v1,v2], get_plane_z)
+            
             st.markdown("埋設体積"); st.subheader(f"{vol:.2f} m³")
 
-# 3Dグラフ描画
+# === 3Dグラフ描画 (エラー修正箇所) ===
 fig = go.Figure()
-if site_vertices is not None and len(site_vertices) > 0:
-    v, f = create_mesh_from_vertices(site_vertices)
-    if v.size > 0: fig.add_trace(go.Mesh3d(x=v[:,0],y=v[:,1],z=v[:,2],i=f[:,0],j=f[:,1],k=f[:,2],color='burlywood',opacity=0.7))
 
+# 敷地
+if site_vertices is not None and len(site_vertices) > 0:
+    verts, faces = create_mesh_from_vertices(site_vertices)
+    if verts.size > 0: 
+        fig.add_trace(go.Mesh3d(
+            x=verts[:,0],y=verts[:,1],z=verts[:,2],
+            i=faces[:,0],j=faces[:,1],k=faces[:,2],
+            color='burlywood',opacity=0.7, name="Site"
+        ))
+
+# 柱
 if pillars_config:
     for pillar_id, config in pillars_config.items():
         x,y=config['pos']; z_off=st.session_state.pillar_offsets[pillar_id]; total_h=config['frustum_h']+config['base_cyl_h']+config['main_cyl_h']
         init_z=get_plane_z(x,y)-(total_h*4/5)
-        f_pos=[x,y,init_z+z_off]; b_pos=[f_pos[0],f_pos[1],f_pos[2]+config['frustum_h']]; m_pos=[b_pos[0],b_pos[1],b_pos[2]+config['base_cyl_h']]
-        l_s=[m_pos[0],m_pos[1],m_pos[2]+config['main_cyl_h']]; l_e=[l_s[0],l_s[1],l_s[2]+1.5]
         
-        verts, faces = create_frustum_mesh(f_pos,config['frustum_r_bottom'],config['frustum_r_top'],config['frustum_h']); fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='gray'))
-        verts, faces = create_cylinder_mesh(b_pos,config['base_cyl_r'],config['base_cyl_h']); fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='darkgrey'))
-        verts, faces = create_cylinder_mesh(m_pos,config['main_cyl_r'],config['main_cyl_h']); fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='lightslategray'))
+        f_pos=[x,y,init_z+z_off]
+        b_pos=[f_pos[0],f_pos[1],f_pos[2]+config['frustum_h']]
+        m_pos=[b_pos[0],b_pos[1],b_pos[2]+config['base_cyl_h']]
+        l_s=[m_pos[0],m_pos[1],m_pos[2]+config['main_cyl_h']]
+        l_e=[l_s[0],l_s[1],l_s[2]+1.5]
+        
+        # 各パーツのメッシュを生成して描画
+        verts, faces = create_frustum_mesh(f_pos,config['frustum_r_bottom'],config['frustum_r_top'],config['frustum_h'])
+        fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='gray'))
+        
+        verts, faces = create_cylinder_mesh(b_pos,config['base_cyl_r'],config['base_cyl_h'])
+        fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='darkgrey'))
+
+        verts, faces = create_cylinder_mesh(m_pos,config['main_cyl_r'],config['main_cyl_h'])
+        fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='lightslategray'))
+        
         fig.add_trace(go.Scatter3d(x=[l_s[0],l_e[0]],y=[l_s[1],l_e[1]],z=[l_s[2],l_e[2]],mode='lines',line=dict(color='red',width=7)))
 
 if st.session_state.drawing_points: fig.add_trace(go.Scatter3d(x=[st.session_state.drawing_points[0]['x']],y=[st.session_state.drawing_points[0]['y']],z=[st.session_state.drawing_points[0]['z']],mode='markers',marker=dict(color='magenta',size=10,symbol='cross')))
