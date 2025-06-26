@@ -36,28 +36,45 @@ def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
     faces = []
     for i in range(n_segments):
         next_i = (i + 1) % n_segments
-        faces.extend([[i, next_i, i + n_segments], [next_i, i + n_segments, next_i + n_segments]])
-    for i in range(n_segments):
-        faces.append([i, (i + 1) % n_segments, 2 * n_segments])
-        faces.append([i + n_segments, ((i + 1) % n_segments) + n_segments, 2 * n_segments + 1])
+        top_i, top_next_i = i + n_segments, next_i + n_segments
+        faces.extend([[i, next_i, top_next_i], [i, top_next_i, top_i]])
+        faces.append([i, next_i, 2 * n_segments])
+        faces.append([top_i, top_next_i, 2 * n_segments + 1])
     return verts, np.array(faces, dtype=int)
 
 def create_frustum_mesh(center_pos, bottom_radius, top_radius, height, n_segments=32):
+    """【修正版】円錐台のメッシュを確実に生成する"""
     theta = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
-    xb, yb = bottom_radius * np.cos(theta), bottom_radius * np.sin(theta)
-    xt, yt = top_radius * np.cos(theta), top_radius * np.sin(theta)
+    
     verts = []
-    for i in range(n_segments): verts.append([xb[i], yb[i], 0])
-    for i in range(n_segments): verts.append([xt[i], yt[i], height])
-    verts.extend([[0, 0, 0], [0, 0, height]])
-    verts = np.array(verts, dtype=float) + np.array(center_pos, dtype=float)
+    # Bottom circle vertices
+    for angle in theta:
+        verts.append([bottom_radius * np.cos(angle), bottom_radius * np.sin(angle), 0])
+    # Top circle vertices
+    for angle in theta:
+        verts.append([top_radius * np.cos(angle), top_radius * np.sin(angle), height])
+    
+    # Add center points for caps
+    verts.append([0, 0, 0])      # Bottom center (index 2*n_segments)
+    verts.append([0, 0, height]) # Top center (index 2*n_segments + 1)
+    
+    verts = np.array(verts, dtype=float) + np.array(center_pos)
+    
+    # Generate faces
     faces = []
     for i in range(n_segments):
-        next_i = (i + 1) % n_segments
-        faces.extend([[i, next_i, i + n_segments], [next_i, i + n_segments, next_i + n_segments]])
-    for i in range(n_segments):
-        faces.append([i, (i + 1) % n_segments, 2 * n_segments])
-        faces.append([i + n_segments, ((i + 1) % n_segments) + n_segments, 2 * n_segments + 1])
+        i_next = (i + 1) % n_segments
+        top_i, top_i_next = i + n_segments, i_next + n_segments
+        
+        # Side faces (two triangles per quad)
+        faces.extend([[i, i_next, top_i], [i_next, top_i_next, top_i]])
+        
+        # Bottom cap
+        faces.append([i, i_next, 2 * n_segments])
+        
+        # Top cap
+        faces.append([top_i, top_i_next, 2 * n_segments + 1])
+        
     return verts, np.array(faces, dtype=int)
 
 def get_intersection_polygon(vertices, faces, plane_func):
@@ -71,15 +88,13 @@ def get_intersection_polygon(vertices, faces, plane_func):
             edges.add((start_idx, end_idx))
             
     for start_idx, end_idx in edges:
-        p1 = vertices[start_idx]
-        p2 = vertices[end_idx]
-        
+        p1, p2 = vertices[start_idx], vertices[end_idx]
         d1 = p1[2] - plane_func(p1[0], p1[1])
         d2 = p2[2] - plane_func(p2[0], p2[1])
         
-        if d1 * d2 < 0: # エッジが平面を横切る場合
-            ratio = d1 / (d1 - d2)
-            intersect_pt = p1 - ratio * (p2 - p1)
+        if d1 * d2 < 0:
+            ratio = d1 / (d1 - d2) if (d1-d2) != 0 else 0.5
+            intersect_pt = p1 + ratio * (p2 - p1) # Corrected interpolation
             intersection_points.append(intersect_pt)
     
     if not intersection_points: return np.array([])
@@ -89,37 +104,23 @@ def get_intersection_polygon(vertices, faces, plane_func):
     angles = np.arctan2(points[:, 1] - center[1], points[:, 0] - center[0])
     sorted_points = points[np.argsort(angles)]
     
-    return np.vstack([sorted_points, sorted_points[0]]) # ループを閉じる
+    return np.vstack([sorted_points, sorted_points[0]])
 
-def calculate_volumes(verts, plane_func, samples=10000):
+def calculate_volumes(verts, plane_func, samples=5000):
+    """【修正版】頂点群の上部・下部の体積を計算"""
     if verts is None or verts.size == 0: return 0, 0
     min_c, max_c = verts.min(axis=0), verts.max(axis=0)
     dims = max_c - min_c
-    if np.any(dims == 0): return 0, 0
+    bbox_volume = np.prod(dims)
+    if bbox_volume == 0: return 0, 0
     
-    # 形状のバウンディングボックス内にランダムな点を生成
     random_points = np.random.rand(samples, 3) * dims + min_c
-    
-    # ここではバウンディングボックスの体積ではなく、実際の円錐台の体積を近似
-    # 簡易的ながらより正確な方法として、点が円錐台の内側にあるかもチェック
-    r_bottom = np.max(np.sqrt((verts[:,0]-verts[:,0].mean())**2 + (verts[:,1]-verts[:,1].mean())**2))
-    r_top = r_bottom * (config['foundation_r_top'] / config['foundation_r_bottom']) # 比率を維持
-    h = dims[2]
-
-    # 点が円錐台の内側にあるかどうかのチェック（簡易版）
-    z_rel = (random_points[:, 2] - min_c[2]) / h
-    current_radius = r_bottom * (1 - z_rel) + r_top * z_rel
-    point_dist_from_center = np.sqrt((random_points[:, 0] - min_c[0])**2 + (random_points[:, 1] - min_c[1])**2)
-    inside_mask = point_dist_from_center <= current_radius
-
     plane_z_at_points = plane_func(random_points[:, 0], random_points[:, 1])
-    is_above = (random_points[:, 2] >= plane_z_at_points) & inside_mask
-    is_below = (random_points[:, 2] < plane_z_at_points) & inside_mask
+    is_above = random_points[:, 2] >= plane_z_at_points
+    is_below = ~is_above
     
-    total_volume = np.pi * h * (r_bottom**2 + r_bottom * r_top + r_top**2) / 3
-    
-    vol_above = total_volume * (np.sum(is_above) / np.sum(inside_mask)) if np.sum(inside_mask) > 0 else 0
-    vol_below = total_volume * (np.sum(is_below) / np.sum(inside_mask)) if np.sum(inside_mask) > 0 else 0
+    vol_above = bbox_volume * (np.sum(is_above) / samples)
+    vol_below = bbox_volume * (np.sum(is_below) / samples)
     
     return vol_above, vol_below
 
