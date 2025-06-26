@@ -185,19 +185,19 @@ for pillar_id, config in pillars_config.items():
     init_z = get_plane_z(x, y) - (total_h * 4/5)
     
     foundation_pos_z = init_z + z_off
-    base_pos_z = foundation_pos_z + config['foundation_h']
+    # ▼▼▼【変更点】ベース円柱の開始高さを、円錐台の底面（短円）に合わせる ▼▼▼
+    base_pos_z = foundation_pos_z
     main_pos_z = base_pos_z + config['base_cyl_h']
     
     foundation_pos = [x, y, foundation_pos_z]; base_pos = [x, y, base_pos_z]; main_pos = [x, y, main_pos_z]
     
-    # ▼▼▼【変更点】円錐台の底面と上面の半径を入れ替えて逆さにする ▼▼▼
+    # 円錐台の描画（逆さのまま）
     frustum_verts, frustum_faces = create_frustum_mesh(
         foundation_pos, 
         config['foundation_r_top'],      # 元の上面の半径を底面に
         config['foundation_r_bottom'],   # 元の底面の半径を上面に
         config['foundation_h']
     )
-    # ▲▲▲【変更点】ここまで ▲▲▲
     
     fig.add_trace(go.Mesh3d(x=frustum_verts[:,0], y=frustum_verts[:,1], z=frustum_verts[:,2], i=frustum_faces[:,0],j=frustum_faces[:,1],k=frustum_faces[:,2], color='limegreen', opacity=0.3))
     
@@ -220,7 +220,7 @@ for pillar_id, config in pillars_config.items():
 
 # グラフのレイアウト設定
 fig.update_layout(
-    title_text="敷地と柱の基本表示（円錐台反転）",
+    title_text="敷地と柱の基本表示（円錐台反転・位置調整）",
     scene=dict(
         xaxis=dict(title='X (m)',range=[-10,10]),
         yaxis=dict(title='Y (m)',range=[-10,10]),
