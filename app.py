@@ -12,7 +12,7 @@ def init_session_state():
     if 'pillar_offsets' not in st.session_state:
         st.session_state.pillar_offsets = {'A': 0.0, 'B': 0.0, 'C': 0.0, 'D': 0.0}
 
-# --- 3Dデータを作成する関数 ---
+# --- 3Dデータを作成・計算する関数 ---
 def get_plane_z(x, y, slope_degrees=30):
     """指定された傾斜角を持つ敷地平面の高さを返す"""
     slope_rad = np.deg2rad(slope_degrees)
@@ -56,6 +56,20 @@ def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
         
     return verts, np.array(faces, dtype=int)
 
+def calculate_buried_volume(verts_list, plane_func, samples=5000):
+    """与えられた頂点群の埋設体積を計算する"""
+    if not verts_list: return 0
+    all_vertices = np.vstack(verts_list)
+    min_c, max_c = all_vertices.min(axis=0), all_vertices.max(axis=0)
+    dims, bbox_volume = max_c - min_c, np.prod(max_c - min_c)
+    if bbox_volume == 0: return 0
+    
+    random_points = np.random.rand(samples, 3) * dims + min_c
+    plane_z_at_points = plane_func(random_points[:, 0], random_points[:, 1])
+    is_below_plane = random_points[:, 2] < plane_z_at_points
+    
+    return bbox_volume * (np.sum(is_below_plane) / samples)
+
 # --- データ定義 ---
 def get_default_site_data():
     """デフォルトの敷地データを生成する"""
@@ -97,46 +111,42 @@ if site_vertices is not None and site_vertices.size > 0:
             color='burlywood', opacity=0.7, name="Site"
         ))
 
-# 柱
-if pillars_config:
-    for pillar_id, config in pillars_config.items():
-        x, y = config['pos']
-        z_off = st.session_state.pillar_offsets.get(pillar_id, 0.0)
-        total_h = config['base_cyl_h'] + config['main_cyl_h']
-        init_z = get_plane_z(x, y) - (total_h * 4/5)
-        
-        # パーツの位置を計算
-        base_pos = [x, y, init_z + z_off]
-        main_pos = [base_pos[0], base_pos[1], base_pos[2] + config['base_cyl_h']]
-        
-        # --- ベース円柱（埋設部色分け） ---
-        verts, faces = create_cylinder_mesh(base_pos, config['base_cyl_r'], config['base_cyl_h'])
-        # 各頂点が地面の下にあるか判定
-        vertex_colors = []
-        for v in verts:
-            site_z = get_plane_z(v[0], v[1])
-            if v[2] < site_z:
-                vertex_colors.append('sienna') # 埋設部分の色
-            else:
-                vertex_colors.append('darkgrey') # 地上部分の色
-        fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],vertexcolor=vertex_colors))
-        
-        # --- メイン円柱（埋設部色分け） ---
-        verts, faces = create_cylinder_mesh(main_pos, config['main_cyl_r'], config['main_cyl_h'])
-        # 各頂点が地面の下にあるか判定
-        vertex_colors = []
-        for v in verts:
-            site_z = get_plane_z(v[0], v[1])
-            if v[2] < site_z:
-                vertex_colors.append('sienna')
-            else:
-                vertex_colors.append('lightslategray')
-        fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],vertexcolor=vertex_colors))
-        
-        # 上部の赤い線を描画
-        line_start = [main_pos[0], main_pos[1], main_pos[2] + config['main_cyl_h']]
-        line_end = [line_start[0], line_start[1], line_start[2] + 1.5]
-        fig.add_trace(go.Scatter3d(x=[line_start[0],line_end[0]],y=[line_start[1],line_end[1]],z=[line_start[2],line_end[2]],mode='lines',line=dict(color='red',width=7)))
+# 柱の描画と体積計算用のデータ準備
+pillar_volumes = {}
+for pillar_id, config in pillars_config.items():
+    x, y = config['pos']
+    z_off = st.session_state.pillar_offsets.get(pillar_id, 0.0)
+    total_h = config['base_cyl_h'] + config['main_cyl_h']
+    init_z = get_plane_z(x, y) - (total_h * 4/5)
+    
+    # パーツの位置を計算
+    base_pos = [x, y, init_z + z_off]
+    main_pos = [base_pos[0], base_pos[1], base_pos[2] + config['base_cyl_h']]
+    
+    # --- ベース円柱（計算対象＆色分け） ---
+    base_verts, base_faces = create_cylinder_mesh(base_pos, config['base_cyl_r'], config['base_cyl_h'])
+    # 各頂点が地面の下にあるか判定し、色を決定
+    vertex_colors = []
+    for v in base_verts:
+        site_z = get_plane_z(v[0], v[1])
+        if v[2] < site_z:
+            vertex_colors.append('sienna')  # 埋設部分の色
+        else:
+            vertex_colors.append('limegreen') # 計算対象の地上部分の色
+    fig.add_trace(go.Mesh3d(x=base_verts[:,0],y=base_verts[:,1],z=base_verts[:,2],i=base_faces[:,0],j=base_faces[:,1],k=base_faces[:,2],vertexcolor=vertex_colors, name=f"Base {pillar_id}"))
+    
+    # --- 埋設体積を計算 ---
+    pillar_volumes[pillar_id] = calculate_buried_volume([base_verts], get_plane_z)
+
+    # --- メイン円柱（計算対象外） ---
+    main_verts, main_faces = create_cylinder_mesh(main_pos, config['main_cyl_r'], config['main_cyl_h'])
+    fig.add_trace(go.Mesh3d(x=main_verts[:,0],y=main_verts[:,1],z=main_verts[:,2],i=main_faces[:,0],j=main_faces[:,1],k=main_faces[:,2],color='lightslategray', name=f"Main {pillar_id}"))
+    
+    # 上部の赤い線を描画
+    line_start = [main_pos[0], main_pos[1], main_pos[2] + config['main_cyl_h']]
+    line_end = [line_start[0], line_start[1], line_start[2] + 1.5]
+    fig.add_trace(go.Scatter3d(x=[line_start[0],line_end[0]],y=[line_start[1],line_end[1]],z=[line_start[2],line_end[2]],mode='lines',line=dict(color='red',width=7)))
+
 
 # レイアウト設定
 fig.update_layout(
@@ -157,14 +167,23 @@ st.plotly_chart(fig, use_container_width=True)
 st.divider()
 
 # --- 操作パネル (画面下部) ---
-st.subheader("各脚の操作")
+st.subheader("各脚の操作と埋設体積")
 cols = st.columns(len(pillars_config))
 for col, pillar_id in zip(cols, pillars_config.keys()):
     with col:
         st.markdown(f"**{pillar_id}脚**")
-        if st.button(f"⬆️##{pillar_id}", use_container_width=True):
-            st.session_state.pillar_offsets[pillar_id] += 0.5
-            st.rerun()
-        if st.button(f"⬇️##{pillar_id}", use_container_width=True):
-            st.session_state.pillar_offsets[pillar_id] -= 0.5
-            st.rerun()
+        
+        # 体積の表示
+        st.markdown("埋設体積（土台部分）")
+        st.subheader(f"{pillar_volumes.get(pillar_id, 0):.2f} m³")
+
+        # 上下ボタン
+        up_down_cols = st.columns(2)
+        with up_down_cols[0]:
+            if st.button(f"⬆️##{pillar_id}", use_container_width=True):
+                st.session_state.pillar_offsets[pillar_id] += 0.5
+                st.rerun()
+        with up_down_cols[1]:
+            if st.button(f"⬇️##{pillar_id}", use_container_width=True):
+                st.session_state.pillar_offsets[pillar_id] -= 0.5
+                st.rerun()
