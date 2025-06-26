@@ -12,12 +12,10 @@ def init_session_state():
         st.session_state.pillar_offsets = {'A': 0.0, 'B': 0.0, 'C': 0.0, 'D': 0.0}
 
 # --- 3Dデータを作成・計算する関数 ---
-# ▼▼▼【変更点1】敷地の傾斜を20度に変更 ▼▼▼
 def get_plane_z(x, y, slope_degrees=20):
     """指定された傾斜の平面上のZ座標を計算する"""
     slope_rad = np.deg2rad(slope_degrees)
     return y * np.tan(slope_rad)
-# ▲▲▲【変更点1】ここまで ▲▲▲
 
 def create_mesh_from_vertices(vertices):
     """頂点データからDelaunay三角形分割を用いてメッシュを生成する"""
@@ -97,17 +95,14 @@ def get_intersection_polygon(vertices, plane_func):
     intersection_points = []
     
     # 円錐台の側面を構成する全ての辺で交差判定を行う
-    # 頂点の数は (セグメント数 * 2 + 2)
     n_segments = (len(vertices) - 2) // 2
     for i in range(n_segments):
         p1 = vertices[i] # 底面の頂点
         p2 = vertices[i + n_segments] # 上面の頂点
         
-        # 各頂点が平面の上にあるか下にあるかを判定
         d1 = p1[2] - plane_func(p1[0], p1[1])
         d2 = p2[2] - plane_func(p2[0], p2[1])
         
-        # 辺が平面をまたいでいる場合、交点を計算
         if d1 * d2 < 0:
             ratio = d1 / (d1 - d2) if (d1 - d2) != 0 else 0.5
             intersect_pt = p1 + ratio * (p2 - p1)
@@ -115,13 +110,11 @@ def get_intersection_polygon(vertices, plane_func):
     
     if len(intersection_points) < 3: return np.array([])
     
-    # 交差点を順序付けしてポリゴンを作成
     points = np.array(intersection_points)
     center = np.mean(points, axis=0)
     angles = np.arctan2(points[:, 1] - center[1], points[:, 0] - center[0])
     sorted_points = points[np.argsort(angles)]
     
-    # 線を閉じるために始点を末尾に追加
     return np.vstack([sorted_points, sorted_points[0]])
 
 def calculate_volumes(verts, plane_func, samples=5000):
@@ -132,16 +125,11 @@ def calculate_volumes(verts, plane_func, samples=5000):
     bbox_volume = np.prod(dims)
     if bbox_volume == 0: return 0, 0
     
-    # バウンディングボックス内にランダムな点を生成
     random_points = np.random.rand(samples, 3) * dims + min_c
-    # 各点における平面のZ座標
     plane_z_at_points = plane_func(random_points[:, 0], random_points[:, 1])
-    
-    # 点が平面の上にあるか下にあるかを判定
     is_above = random_points[:, 2] >= plane_z_at_points
     is_below = ~is_above
     
-    # 点の比率から体積を概算
     vol_above = bbox_volume * (np.sum(is_above) / samples)
     vol_below = bbox_volume * (np.sum(is_below) / samples)
     
@@ -157,15 +145,15 @@ def get_default_site_data():
 def get_default_pillars_config():
     """柱の基本設定を定義する"""
     dist = 7.0 / 2.0; top_r = 1.0; bottom_r = top_r * 3.0
-    # ▼▼▼【変更点2】円錐台の高さを5.0mに変更 ▼▼▼
-    foundation_height = 5.0
+    # ▼▼▼【変更点1】円錐台の高さを10.0mに変更 ▼▼▼
+    foundation_height = 10.0
     return {
         'A': {'pos': [-dist, dist], 'foundation_h': foundation_height, 'foundation_r_bottom': bottom_r, 'foundation_r_top': top_r, 'base_cyl_r': top_r, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
         'B': {'pos': [dist, dist], 'foundation_h': foundation_height, 'foundation_r_bottom': bottom_r, 'foundation_r_top': top_r, 'base_cyl_r': top_r, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
         'C': {'pos': [dist, -dist], 'foundation_h': foundation_height, 'foundation_r_bottom': bottom_r, 'foundation_r_top': top_r, 'base_cyl_r': top_r, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
         'D': {'pos': [-dist, -dist], 'foundation_h': foundation_height, 'foundation_r_bottom': bottom_r, 'foundation_r_top': top_r, 'base_cyl_r': top_r, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
     }
-    # ▲▲▲【変更点2】ここまで ▲▲▲
+    # ▲▲▲【変更点1】ここまで ▲▲▲
 
 # --- メインアプリケーション ---
 init_session_state()
@@ -185,7 +173,6 @@ pillar_volumes = {}
 for pillar_id, config in pillars_config.items():
     x, y = config['pos']; z_off = st.session_state.pillar_offsets.get(pillar_id, 0.0)
     
-    # Z座標の計算
     total_h = config['foundation_h'] + config['base_cyl_h'] + config['main_cyl_h']
     init_z = get_plane_z(x, y) - (total_h * 4/5)
     
@@ -197,14 +184,34 @@ for pillar_id, config in pillars_config.items():
     
     # 円錐台の描画（逆さのまま）
     frustum_verts, frustum_faces = create_frustum_mesh(
-        foundation_pos, 
-        config['foundation_r_top'],      # 元の上面の半径を底面に
-        config['foundation_r_bottom'],   # 元の底面の半径を上面に
-        config['foundation_h']
+        foundation_pos, config['foundation_r_top'], config['foundation_r_bottom'], config['foundation_h']
     )
     
-    fig.add_trace(go.Mesh3d(x=frustum_verts[:,0], y=frustum_verts[:,1], z=frustum_verts[:,2], i=frustum_faces[:,0],j=frustum_faces[:,1],k=frustum_faces[:,2], color='limegreen', opacity=0.3))
-    
+    # ▼▼▼【変更点2】敷地平面を基準にメッシュの面を分割し、色分けして描画 ▼▼▼
+    faces_above = []
+    faces_below = []
+
+    for face in frustum_faces:
+        v1, v2, v3 = frustum_verts[face[0]], frustum_verts[face[1]], frustum_verts[face[2]]
+        centroid = (v1 + v2 + v3) / 3.0
+        plane_z_at_centroid = get_plane_z(centroid[0], centroid[1])
+        if centroid[2] > plane_z_at_centroid:
+            faces_above.append(face)
+        else:
+            faces_below.append(face)
+
+    faces_above = np.array(faces_above)
+    faces_below = np.array(faces_below)
+
+    # 敷地より下の部分を緑色で描画
+    if len(faces_below) > 0:
+        fig.add_trace(go.Mesh3d(x=frustum_verts[:,0], y=frustum_verts[:,1], z=frustum_verts[:,2], i=faces_below[:,0],j=faces_below[:,1],k=faces_below[:,2], color='limegreen', opacity=0.5))
+
+    # 敷地より上の部分を青色で描画
+    if len(faces_above) > 0:
+        fig.add_trace(go.Mesh3d(x=frustum_verts[:,0], y=frustum_verts[:,1], z=frustum_verts[:,2], i=faces_above[:,0],j=faces_above[:,1],k=faces_above[:,2], color='blue', opacity=0.5))
+    # ▲▲▲【変更点2】ここまで ▲▲▲
+
     # 交差線の描画
     intersection_line = get_intersection_polygon(frustum_verts, get_plane_z)
     if intersection_line.size > 0:
@@ -218,19 +225,13 @@ for pillar_id, config in pillars_config.items():
     verts, faces = create_cylinder_mesh(base_pos, config['base_cyl_r'], config['base_cyl_h']); fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='darkgrey'))
     verts, faces = create_cylinder_mesh(main_pos, config['main_cyl_r'], config['main_cyl_h']); fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='lightslategray'))
     
-    # 柱上部の赤い線の描画
     line_start = [main_pos[0], main_pos[1], main_pos[2] + config['main_cyl_h']]; line_end = [line_start[0], line_start[1], line_start[2] + 1.5]
     fig.add_trace(go.Scatter3d(x=[line_start[0],line_end[0]],y=[line_start[1],line_end[1]],z=[line_start[2],line_end[2]],mode='lines',line=dict(color='red',width=7)))
 
 # グラフのレイアウト設定
 fig.update_layout(
-    title_text="敷地と柱の基本表示（傾斜20度・円錐台高さ5m）",
-    scene=dict(
-        xaxis=dict(title='X (m)',range=[-10,10]),
-        yaxis=dict(title='Y (m)',range=[-10,10]),
-        zaxis=dict(title='Z (m)',range=[-10,10]),
-        aspectratio=dict(x=1,y=1,z=1)
-    ),
+    title_text="敷地と柱の基本表示（円錐台高さ10m・色分け）",
+    scene=dict(xaxis=dict(title='X (m)',range=[-10,10]),yaxis=dict(title='Y (m)',range=[-10,10]),zaxis=dict(title='Z (m)',range=[-10,10]),aspectratio=dict(x=1,y=1,z=1)),
     margin=dict(l=0,r=0,b=0,t=40),
     showlegend=False
 )
@@ -248,9 +249,7 @@ for col, pillar_id in zip(cols, pillars_config.keys()):
         up_down_cols = st.columns(2)
         with up_down_cols[0]:
             if st.button(f"⬆️##{pillar_id}", use_container_width=True):
-                st.session_state.pillar_offsets[pillar_id] += 0.5
-                st.rerun()
+                st.session_state.pillar_offsets[pillar_id] += 0.5; st.rerun()
         with up_down_cols[1]:
             if st.button(f"⬇️##{pillar_id}", use_container_width=True):
-                st.session_state.pillar_offsets[pillar_id] -= 0.5
-                st.rerun()
+                st.session_state.pillar_offsets[pillar_id] -= 0.5; st.rerun()
