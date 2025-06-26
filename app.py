@@ -30,15 +30,16 @@ def create_mesh_from_vertices(vertices):
         st.error(f"メッシュの生成に失敗しました: {e}")
         return np.array([]), np.array([])
 
-def create_circular_cylinder_mesh(center_pos, radius, height, n_segments=32):
+def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
     """【修正版】円柱の頂点と面データを生成する"""
     theta = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
     x_c = radius * np.cos(theta)
     y_c = radius * np.sin(theta)
     
     verts = []
-    # Bottom, Top, Center points
+    # Bottom circle (indices 0 to n-1)
     for i in range(n_segments): verts.append([x_c[i], y_c[i], 0])
+    # Top circle (indices n to 2n-1)
     for i in range(n_segments): verts.append([x_c[i], y_c[i], height])
     verts.append([0, 0, 0])      # Bottom center (index: 2n)
     verts.append([0, 0, height]) # Top center (index: 2n+1)
@@ -57,17 +58,17 @@ def create_circular_cylinder_mesh(center_pos, radius, height, n_segments=32):
         
     return verts, np.array(faces, dtype=int)
 
-def create_circular_slanted_frustum_mesh(center_pos, bottom_radius, top_radius, top_z, plane_func, n_segments=32):
+def create_slanted_frustum_mesh(center_pos, bottom_radius, top_radius, top_z, plane_func, n_segments=32):
     """【修正版】敷地面に沿った円錐台のメッシュを生成する"""
     theta = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
     
     verts = []
-    # Top circle vertices (at a fixed height)
+    # Top circle vertices
     xt, yt = top_radius * np.cos(theta), top_radius * np.sin(theta)
     for i in range(n_segments):
         verts.append([center_pos[0] + xt[i], center_pos[1] + yt[i], top_z])
         
-    # Bottom circle vertices (Z value follows the plane)
+    # Bottom circle vertices
     xb, yb = bottom_radius * np.cos(theta), bottom_radius * np.sin(theta)
     for i in range(n_segments):
         px, py = center_pos[0] + xb[i], center_pos[1] + yb[i]
@@ -80,16 +81,22 @@ def create_circular_slanted_frustum_mesh(center_pos, bottom_radius, top_radius, 
     # Side faces
     for i in range(n_segments):
         next_i = (i + 1) % n_segments
-        faces.extend([
-            [i, next_i, i + n_segments],
-            [next_i, next_i + n_segments, i + n_segments]
-        ])
+        faces.extend([[i, next_i, i + n_segments], [next_i, i + n_segments, next_i + n_segments]])
     
-    # Top cap (flat)
+    # Top cap
     top_center_idx = len(verts)
     verts = np.vstack([verts, [center_pos[0], center_pos[1], top_z]])
+    for i in range(n_segments): faces.append([i, (i + 1) % n_segments, top_center_idx])
+
+    # Bottom cap (slanted)
+    bottom_center_idx = len(verts)
+    bottom_verts = verts[n_segments:2*n_segments]
+    centroid = np.mean(bottom_verts, axis=0)
+    verts = np.vstack([verts, centroid])
     for i in range(n_segments):
-        faces.append([i, (i + 1) % n_segments, top_center_idx])
+        idx1 = n_segments + i
+        idx2 = n_segments + (i + 1) % n_segments
+        faces.append([idx1, idx2, bottom_center_idx])
 
     return verts, np.array(faces, dtype=int)
 
@@ -110,7 +117,6 @@ def get_default_site_data():
 
 def get_default_pillars_config():
     dist = 7.0 / 2.0
-    # 上の円の半径を基準に下の円の半径を3倍にする
     top_r = 1.0
     bottom_r = top_r * 3.0
     config = {
@@ -142,10 +148,9 @@ pillar_volumes = {}
 for pillar_id, config in pillars_config.items():
     x, y = config['pos']
     z_off = st.session_state.pillar_offsets.get(pillar_id, 0.0)
-    total_h = config['base_cyl_h'] + config['main_cyl_h'] # foundation height is not included here
+    total_h = config['base_cyl_h'] + config['main_cyl_h'] 
     init_z = get_plane_z(x, y) - (total_h * 4/5)
     
-    # パーツの位置を計算
     base_pos_z = init_z + z_off
     main_pos_z = base_pos_z + config['base_cyl_h']
     
@@ -153,12 +158,8 @@ for pillar_id, config in pillars_config.items():
     main_pos = [x, y, main_pos_z]
     
     # --- 新しい基礎柱（計算対象）---
-    foundation_verts, foundation_faces = create_circular_slanted_frustum_mesh(
-        [x, y, 0], 
-        config['foundation_r_bottom'],
-        config['foundation_r_top'],
-        base_pos_z, 
-        get_plane_z
+    foundation_verts, foundation_faces = create_slanted_frustum_mesh(
+        [x, y, 0], config['foundation_r_bottom'], config['foundation_r_top'], base_pos_z, get_plane_z
     )
     fig.add_trace(go.Mesh3d(x=foundation_verts[:,0], y=foundation_verts[:,1], z=foundation_verts[:,2], i=foundation_faces[:,0],j=foundation_faces[:,1],k=foundation_faces[:,2], color='limegreen', opacity=0.3, name=f"Foundation {pillar_id}"))
     
@@ -166,11 +167,11 @@ for pillar_id, config in pillars_config.items():
     pillar_volumes[pillar_id] = calculate_buried_volume([foundation_verts], get_plane_z)
 
     # --- 土台円柱 ---
-    verts, faces = create_circular_cylinder_mesh(base_pos, config['base_cyl_r'], config['base_cyl_h'])
+    verts, faces = create_cylinder_mesh(base_pos, config['base_cyl_r'], config['base_cyl_h'])
     fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='darkgrey'))
     
     # --- メイン円柱 ---
-    verts, faces = create_circular_cylinder_mesh(main_pos, config['main_cyl_r'], config['main_cyl_h'])
+    verts, faces = create_cylinder_mesh(main_pos, config['main_cyl_r'], config['main_cyl_h'])
     fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='lightslategray'))
     
     # 上部の赤い線
