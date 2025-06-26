@@ -51,22 +51,28 @@ def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
     verts.append([0, 0, height]) # Top center (index: 2n+1)
     verts = np.array(verts, dtype=float) + np.array(center_pos, dtype=float)
     
-    faces = []
+    i_indices, j_indices, k_indices = [], [], []
     # Side faces
     for i in range(n_segments):
         i_next = (i + 1) % n_segments
-        faces.extend([[i, i_next, i_next + n_segments], [i, i_next + n_segments, i + n_segments]])
+        i_indices.extend([i, i])
+        j_indices.extend([i_next, i_next + n_segments])
+        k_indices.extend([i_next + n_segments, i + n_segments])
     # Bottom cap
     for i in range(n_segments):
-        faces.append([i, (i + 1) % n_segments, 2 * n_segments])
+        i_indices.append(i)
+        j_indices.append((i + 1) % n_segments)
+        k_indices.append(2 * n_segments)
     # Top cap
     for i in range(n_segments):
-        faces.append([i + n_segments, ((i + 1) % n_segments) + n_segments, 2 * n_segments + 1])
+        i_indices.append(i + n_segments)
+        j_indices.append(((i + 1) % n_segments) + n_segments)
+        k_indices.append(2 * n_segments + 1)
         
-    return verts, np.array(faces)
+    return verts, i_indices, j_indices, k_indices
 
 def create_frustum_mesh(center_pos, bottom_radius, top_radius, height, n_segments=32):
-    """円錐台のメッシュを作成 (上面・底面ありの修正版)"""
+    """円錐台のメッシュを作成 (上面・底面あり)"""
     theta = np.linspace(0, 2 * np.pi, n_segments)
     xb, yb = bottom_radius * np.cos(theta), bottom_radius * np.sin(theta)
     xt, yt = top_radius * np.cos(theta), top_radius * np.sin(theta)
@@ -78,25 +84,27 @@ def create_frustum_mesh(center_pos, bottom_radius, top_radius, height, n_segment
     for i in range(n_segments): verts.append([xt[i], yt[i], height])
     verts = np.array(verts, dtype=float) + np.array(center_pos, dtype=float)
 
-    faces = []
+    i_indices, j_indices, k_indices = [], [], []
     # Side faces
     for i in range(n_segments):
         i_next = (i + 1) % n_segments
-        faces.extend([[i, i_next, i_next + n_segments], [i, i_next + n_segments, i + n_segments]])
+        i_indices.extend([i, i])
+        j_indices.extend([i_next, i_next + n_segments])
+        k_indices.extend([i_next + n_segments, i + n_segments])
     # Bottom cap
     bottom_center_idx = len(verts)
     verts = np.vstack([verts, center_pos + np.array([0, 0, 0])])
     for i in range(n_segments):
-        faces.append([i, (i + 1) % n_segments, bottom_center_idx])
+        i_indices.append(i); j_indices.append((i+1)%n_segments); k_indices.append(bottom_center_idx)
     # Top cap
     top_center_idx = len(verts)
     verts = np.vstack([verts, center_pos + np.array([0, 0, height])])
     for i in range(n_segments):
-        top_i = i + n_segments
-        top_i_next = ((i + 1) % n_segments) + n_segments
-        faces.append([top_i, top_i_next, top_center_idx])
+        top_i, top_i_next = i + n_segments, ((i + 1) % n_segments) + n_segments
+        i_indices.append(top_i); j_indices.append(top_i_next); k_indices.append(top_center_idx)
         
-    return verts, np.array(faces)
+    return verts, i_indices, j_indices, k_indices
+
 
 def calculate_buried_volume_for_one_pillar(buried_components_verts, plane_func, samples=5000):
     if not buried_components_verts: return 0
@@ -142,7 +150,7 @@ def get_predefined_pillar_models():
     return models
 
 def create_pillar_config_from_df(df):
-    """Pandas DataFrameから柱の設定辞書を生成する (KeyError修正版)"""
+    """Pandas DataFrameから柱の設定辞書を生成する"""
     config = {}
     try:
         required_cols = {'id', 'x', 'y', 'frustum_h', 'base_cyl_h', 'main_cyl_h', 'frustum_r_bottom', 'frustum_r_top', 'base_cyl_r', 'main_cyl_r'}
@@ -228,25 +236,43 @@ if pillars_config:
             initial_z_base = get_plane_z(x_pos,y_pos) - (total_h*4/5)
             frustum_pos = [x_pos,y_pos,initial_z_base+z_offset]
             base_cyl_pos = [frustum_pos[0],frustum_pos[1],frustum_pos[2]+config.get('frustum_h',0)]
-            v1,_=create_frustum_mesh(frustum_pos, config.get('frustum_r_bottom',0), config.get('frustum_r_top',0), config.get('frustum_h',0))
-            v2,_=create_cylinder_mesh(base_cyl_pos, config.get('base_cyl_r',0), config.get('base_cyl_h',0))
-            vol=calculate_buried_volume_for_one_pillar([v1,v2], get_plane_z)
+            v1,_,_,_ = create_frustum_mesh(frustum_pos, config.get('frustum_r_bottom',0), config.get('frustum_r_top',0), config.get('frustum_h',0))
+            v2,_,_,_ = create_cylinder_mesh(base_cyl_pos, config.get('base_cyl_r',0), config.get('base_cyl_h',0))
+            vol = calculate_buried_volume_for_one_pillar([v1,v2], get_plane_z)
             st.markdown("埋設体積"); st.subheader(f"{vol:.2f} m³")
 
 # 3Dグラフ描画
 fig = go.Figure()
 if site_vertices is not None:
-    v,f=create_mesh_from_vertices(site_vertices); fig.add_trace(go.Mesh3d(x=v[:,0],y=v[:,1],z=v[:,2],i=f[:,0],j=f[:,1],k=f[:,2],color='burlywood',opacity=0.7))
+    v, f = create_mesh_from_vertices(site_vertices)
+    fig.add_trace(go.Mesh3d(x=v[:,0],y=v[:,1],z=v[:,2],i=f[:,0],j=f[:,1],k=f[:,2],color='burlywood',opacity=0.7))
+
 if pillars_config:
-    for pillar_id,config in pillars_config.items():
-        x,y=config['pos']; z_off=st.session_state.pillar_offsets[pillar_id]; total_h=config['frustum_h']+config['base_cyl_h']+config['main_cyl_h']
-        init_z=get_plane_z(x,y)-(total_h*4/5)
-        f_pos=[x,y,init_z+z_off]; b_pos=[f_pos[0],f_pos[1],f_pos[2]+config['frustum_h']]; m_pos=[b_pos[0],b_pos[1],b_pos[2]+config['base_cyl_h']]
-        l_s=[m_pos[0],m_pos[1],m_pos[2]+config['main_cyl_h']]; l_e=[l_s[0],l_s[1],l_s[2]+1.5]
-        v,f=create_frustum_mesh(f_pos,config['frustum_r_bottom'],config['frustum_r_top'],config['frustum_h']); fig.add_trace(go.Mesh3d(x=v[:,0],y=v[:,1],z=v[:,2],i=f[:,0],j=f[:,1],k=f[:,2],color='gray'))
-        v,f=create_cylinder_mesh(b_pos,config['base_cyl_r'],config['base_cyl_h']); fig.add_trace(go.Mesh3d(x=v[:,0],y=v[:,1],z=v[:,2],i=f[:,0],j=f[:,1],k=f[:,2],color='darkgrey'))
-        v,f=create_cylinder_mesh(m_pos,config['main_cyl_r'],config['main_cyl_h']); fig.add_trace(go.Mesh3d(x=v[:,0],y=v[:,1],z=v[:,2],i=f[:,0],j=f[:,1],k=f[:,2],color='lightslategray'))
+    for pillar_id, config in pillars_config.items():
+        x, y = config['pos']
+        z_off = st.session_state.pillar_offsets[pillar_id]
+        total_h = config['frustum_h'] + config['base_cyl_h'] + config['main_cyl_h']
+        init_z = get_plane_z(x, y) - (total_h * 4/5)
+        
+        # 各パーツの位置を計算
+        f_pos = [x, y, init_z + z_off]
+        b_pos = [f_pos[0], f_pos[1], f_pos[2] + config['frustum_h']]
+        m_pos = [b_pos[0], b_pos[1], b_pos[2] + config['base_cyl_h']]
+        l_s = [m_pos[0], m_pos[1], m_pos[2] + config['main_cyl_h']]
+        l_e = [l_s[0], l_s[1], l_s[2] + 1.5]
+
+        # 各パーツのメッシュを生成して描画
+        v, i, j, k = create_frustum_mesh(f_pos, config['frustum_r_bottom'], config['frustum_r_top'], config['frustum_h'])
+        fig.add_trace(go.Mesh3d(x=v[:,0], y=v[:,1], z=v[:,2], i=i, j=j, k=k, color='gray'))
+        
+        v, i, j, k = create_cylinder_mesh(b_pos, config['base_cyl_r'], config['base_cyl_h'])
+        fig.add_trace(go.Mesh3d(x=v[:,0], y=v[:,1], z=v[:,2], i=i, j=j, k=k, color='darkgrey'))
+        
+        v, i, j, k = create_cylinder_mesh(m_pos, config['main_cyl_r'], config['main_cyl_h'])
+        fig.add_trace(go.Mesh3d(x=v[:,0], y=v[:,1], z=v[:,2], i=i, j=j, k=k, color='lightslategray'))
+        
         fig.add_trace(go.Scatter3d(x=[l_s[0],l_e[0]],y=[l_s[1],l_e[1]],z=[l_s[2],l_e[2]],mode='lines',line=dict(color='red',width=7)))
+
 if st.session_state.drawing_points: fig.add_trace(go.Scatter3d(x=[st.session_state.drawing_points[0]['x']],y=[st.session_state.drawing_points[0]['y']],z=[st.session_state.drawing_points[0]['z']],mode='markers',marker=dict(color='magenta',size=10,symbol='cross')))
 for line in st.session_state.lines: fig.add_trace(go.Scatter3d(x=[line["start"]['x'],line["end"]['x']],y=[line["start"]['y'],line["end"]['y']],z=[line["start"]['z'],line["end"]['z']],mode='lines',line=dict(color='cyan',width=5)))
 fig.update_layout(scene=dict(xaxis=dict(title='X (m)',range=[-10,10]),yaxis=dict(title='Y (m)',range=[-10,10]),zaxis=dict(title='Z (m)',range=[-10,10]),aspectratio=dict(x=1,y=1,z=1)),margin=dict(l=0,r=0,b=0,t=5),showlegend=False)
