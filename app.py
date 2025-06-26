@@ -117,13 +117,21 @@ def get_default_site_data():
 
 def get_default_pillars_config():
     dist = 7.0 / 2.0
-    top_r = 1.0
-    bottom_r = top_r * 3.0
+    # 下の円柱(土台)の半径を定義
+    base_cyl_radius = 2.0 # 直径を2倍にするので、半径も2倍 (1.0 -> 2.0)
+    
+    # 基礎部分(円錐台)の寸法を定義
+    foundation_top_radius = base_cyl_radius # 土台と接続するので同じ半径
+    foundation_bottom_radius = foundation_top_radius * 3.0 # 基礎の下側は、その上側の3倍
+
+    # 上の円柱(メイン)の半径
+    main_cyl_radius = 0.5
+
     config = {
-        'A': {'pos': [-dist, dist], 'foundation_r_bottom': bottom_r, 'foundation_r_top': top_r, 'base_cyl_r': top_r, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
-        'B': {'pos': [dist, dist], 'foundation_r_bottom': bottom_r, 'foundation_r_top': top_r, 'base_cyl_r': top_r, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
-        'C': {'pos': [dist, -dist], 'foundation_r_bottom': bottom_r, 'foundation_r_top': top_r, 'base_cyl_r': top_r, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
-        'D': {'pos': [-dist, -dist], 'foundation_r_bottom': bottom_r, 'foundation_r_top': top_r, 'base_cyl_r': top_r, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
+        'A': {'pos': [-dist, dist], 'foundation_r_bottom': foundation_bottom_radius, 'foundation_r_top': foundation_top_radius, 'base_cyl_r': base_cyl_radius, 'base_cyl_h': 1.5, 'main_cyl_r': main_cyl_radius, 'main_cyl_h': 6.0},
+        'B': {'pos': [dist, dist], 'foundation_r_bottom': foundation_bottom_radius, 'foundation_r_top': foundation_top_radius, 'base_cyl_r': base_cyl_radius, 'base_cyl_h': 1.5, 'main_cyl_r': main_cyl_radius, 'main_cyl_h': 6.0},
+        'C': {'pos': [dist, -dist], 'foundation_r_bottom': foundation_bottom_radius, 'foundation_r_top': foundation_top_radius, 'base_cyl_r': base_cyl_radius, 'base_cyl_h': 1.5, 'main_cyl_r': main_cyl_radius, 'main_cyl_h': 6.0},
+        'D': {'pos': [-dist, -dist], 'foundation_r_bottom': foundation_bottom_radius, 'foundation_r_top': foundation_top_radius, 'base_cyl_r': base_cyl_radius, 'base_cyl_h': 1.5, 'main_cyl_r': main_cyl_radius, 'main_cyl_h': 6.0},
     }
     return config
 
