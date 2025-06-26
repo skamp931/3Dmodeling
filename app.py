@@ -17,9 +17,8 @@ def init_session_state():
         st.session_state.pillar_offsets = {'A': 0.0, 'B': 0.0, 'C': 0.0, 'D': 0.0}
     if 'data_source' not in st.session_state:
         st.session_state.data_source = "デフォルト設定"
-    # 現在選択されているモデル名を保存
     if 'selected_model' not in st.session_state:
-        st.session_state.selected_model = "Model A"
+        st.session_state.selected_model = "Model A (標準)"
 
 def reset_scene_state():
     """柱の高さや描画線をリセットする"""
@@ -102,23 +101,10 @@ def get_predefined_pillar_models():
     return models
 
 def create_pillar_config_from_df(df):
-    """Pandas DataFrameから柱の設定辞書を生成する"""
     config = {}
     try:
-        # 'id'列をインデックスとして設定
         df.set_index('id', inplace=True)
-        # 各行を辞書に変換
-        for pillar_id, row in df.iterrows():
-            config[pillar_id] = {
-                'pos': [row['x'], row['y']],
-                'frustum_h': row['frustum_h'],
-                'base_cyl_h': row['base_cyl_h'],
-                'main_cyl_h': row['main_cyl_h'],
-                'frustum_r_bottom': row['frustum_r_bottom'],
-                'frustum_r_top': row['frustum_r_top'],
-                'base_cyl_r': row['base_cyl_r'],
-                'main_cyl_r': row['main_cyl_r'],
-            }
+        for pillar_id, row in df.iterrows(): config[pillar_id] = row.to_dict()
         return config
     except Exception as e:
         st.error(f"柱CSVファイルの形式が正しくありません: {e}")
@@ -128,37 +114,33 @@ def create_pillar_config_from_df(df):
 init_session_state()
 st.sidebar.title("🛠️ 設定とツール")
 st.sidebar.subheader("1. データソース")
-data_source_changed = st.sidebar.radio("表示するデータを選択", ["デフォルト設定", "ファイルから読み込み"], key="data_source_radio", on_change=reset_scene_state)
+data_source = st.sidebar.radio("表示するデータを選択", ["デフォルト設定", "ファイルから読み込み"], key="data_source_radio", on_change=reset_scene_state)
 
 site_vertices = None
 pillars_config = None
 
-if st.session_state.data_source == "ファイルから読み込み":
+if data_source == "ファイルから読み込み":
     st.sidebar.info("CSVファイルをアップロードしてください。")
     uploaded_site_file = st.sidebar.file_uploader("敷地データ (site.csv)", type="csv")
     uploaded_pillars_file = st.sidebar.file_uploader("柱データ (pillars.csv)", type="csv")
     
-    site_vertices = get_default_site_data() # デフォルト敷地をフォールバックとして使用
+    site_vertices = get_default_site_data()
     if uploaded_site_file:
-        df = pd.read_csv(uploaded_site_file)
-        if {'x', 'y', 'z'}.issubset(df.columns):
-            site_vertices = df[['x', 'y', 'z']].values
-        else:
-            st.error("敷地ファイルに 'x', 'y', 'z' 列が必要です。")
+        df_site = pd.read_csv(uploaded_site_file)
+        if {'x', 'y', 'z'}.issubset(df_site.columns): site_vertices = df_site[['x', 'y', 'z']].values
+        else: st.error("敷地ファイルに 'x', 'y', 'z' 列が必要です。")
 
     if uploaded_pillars_file:
-        df = pd.read_csv(uploaded_pillars_file)
-        pillars_config = create_pillar_config_from_df(df)
+        df_pillars = pd.read_csv(uploaded_pillars_file)
+        pillars_config = create_pillar_config_from_df(df_pillars)
     else:
         st.warning("柱データがアップロードされていません。デフォルトモデルを表示します。")
         pillars_config = get_predefined_pillar_models()["Model A (標準)"]
 
 else: # デフォルト設定
     models = get_predefined_pillar_models()
-    # モデル選択のUI
-    selected_model = st.sidebar.selectbox("柱のモデルを選択", options=list(models.keys()), key="model_select")
+    selected_model = st.sidebar.selectbox("柱のモデルを選択", options=list(models.keys()), key="model_select", index=list(models.keys()).index(st.session_state.selected_model))
     
-    # モデルが変更されたら状態をリセット
     if selected_model != st.session_state.selected_model:
         st.session_state.selected_model = selected_model
         reset_scene_state()
@@ -180,16 +162,23 @@ if pillars_config:
     for i, (pillar_id, config) in enumerate(pillars_config.items()):
         with cols[i]:
             st.markdown(f"**{pillar_id}脚**")
-            if st.button(f"⬆️##{pillar_id}",use_container_width=True): st.session_state.pillar_offsets[pillar_id]+=0.5; st.rerun()
-            if st.button(f"⬇️##{pillar_id}",use_container_width=True): st.session_state.pillar_offsets[pillar_id]-=0.5; st.rerun()
-            x, y = config['pos']; z_off = st.session_state.pillar_offsets[pillar_id]
+            # === エラー修正箇所 ===
+            # st.rerun() を削除し、Streamlitの自然な再描画に任せます
+            if st.button(f"⬆️##{pillar_id}",use_container_width=True):
+                st.session_state.pillar_offsets[pillar_id]+=0.5
+            if st.button(f"⬇️##{pillar_id}",use_container_width=True):
+                st.session_state.pillar_offsets[pillar_id]-=0.5
+            
+            x_pos, y_pos = config['pos']; z_offset = st.session_state.pillar_offsets[pillar_id]
             total_h = config['frustum_h']+config['base_cyl_h']+config['main_cyl_h']
-            init_z = get_plane_z(x,y) - (total_h*4/5)
-            f_pos=[x,y,init_z+z_off]; b_pos=[f_pos[0],f_pos[1],f_pos[2]+config['frustum_h']]
-            v1,_=create_frustum_mesh(f_pos, config['frustum_r_bottom'], config['frustum_r_top'], config['frustum_h'])
-            v2,_=create_cylinder_mesh(b_pos, config['base_cyl_r'], config['base_cyl_h'])
+            initial_z_base = get_plane_z(x_pos,y_pos) - (total_h*4/5)
+            frustum_pos = [x_pos,y_pos,initial_z_base+z_offset]
+            base_cyl_pos = [frustum_pos[0],frustum_pos[1],frustum_pos[2]+config['frustum_h']]
+            v1,_=create_frustum_mesh(frustum_pos, config['frustum_r_bottom'], config['frustum_r_top'], config['frustum_h'])
+            v2,_=create_cylinder_mesh(base_cyl_pos, config['base_cyl_r'], config['base_cyl_h'])
             vol=calculate_buried_volume_for_one_pillar([v1,v2], get_plane_z)
-            st.metric(f"埋設体積",f"{vol:.2f} m³",key=f"vol_{pillar_id}")
+            # st.metricの引数をキーワード引数で明示的に指定
+            st.metric(label="埋設体積", value=f"{vol:.2f} m³", key=f"vol_{pillar_id}")
 
 # --- 3Dグラフ描画 ---
 fig = go.Figure()
@@ -215,4 +204,3 @@ if selected_points and st.session_state.drawing_mode:
     if not st.session_state.drawing_points: st.session_state.drawing_points.append(p)
     else: st.session_state.lines.append({"start":st.session_state.drawing_points.pop(0),"end":p})
     st.rerun()
-
