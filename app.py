@@ -35,13 +35,14 @@ def create_mesh_from_vertices(vertices):
     """頂点群からDelaunay三角分割でメッシュを作成する"""
     try:
         points_2d = vertices[:, :2]
+        if points_2d.shape[0] < 3: return np.array([]), np.array([])
         tri = Delaunay(points_2d)
         return vertices, tri.simplices
     except Exception:
         return np.array([]), np.array([])
 
 def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
-    """【最終修正版】円柱のメッシュを作成"""
+    """円柱のメッシュを作成 (上面・底面あり)"""
     theta = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
     x, y = radius * np.cos(theta), radius * np.sin(theta)
     
@@ -55,35 +56,6 @@ def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
     
     verts = np.array(verts, dtype=float) + np.array(center_pos, dtype=float)
     
-    faces = []
-    # Side faces
-    for i in range(n_segments):
-        next_i = (i + 1) % n_segments
-        faces.append([i, next_i, i + n_segments])
-        faces.append([next_i, next_i + n_segments, i + n_segments])
-    # Bottom cap
-    for i in range(n_segments): faces.append([i, (i + 1) % n_segments, 2 * n_segments])
-    # Top cap
-    for i in range(n_segments): faces.append([i + n_segments, ((i + 1) % n_segments) + n_segments, 2 * n_segments + 1])
-        
-    return verts, np.array(faces, dtype=int)
-
-def create_frustum_mesh(center_pos, bottom_radius, top_radius, height, n_segments=32):
-    """【最終修正版】円錐台のメッシュを作成"""
-    theta = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
-    xb, yb = bottom_radius * np.cos(theta), bottom_radius * np.sin(theta)
-    xt, yt = top_radius * np.cos(theta), top_radius * np.sin(theta)
-    
-    verts = []
-    # Bottom circle (indices 0 to n-1)
-    for i in range(n_segments): verts.append([xb[i], yb[i], 0])
-    # Top circle (indices n to 2n-1)
-    for i in range(n_segments): verts.append([xt[i], yt[i], height])
-    verts.append([0, 0, 0])      # Bottom center (index: 2n)
-    verts.append([0, 0, height]) # Top center (index: 2n+1)
-    
-    verts = np.array(verts, dtype=float) + np.array(center_pos, dtype=float)
-
     faces = []
     # Side faces
     for i in range(n_segments):
@@ -115,12 +87,34 @@ def get_default_site_data():
     return np.c_[xv.ravel(), yv.ravel(), z.ravel()]
 
 def get_predefined_pillar_models():
-    dist = 7.0 / 2.0; base = {'pos': [-dist, dist], 'frustum_r_bottom': 2.5}
-    models = { "Model A (標準)": { 'A': {**base, 'frustum_h': 2.0, 'base_cyl_h': 1.0, 'main_cyl_h': 5.0, 'frustum_r_top': 0.5, 'base_cyl_r': 0.5, 'main_cyl_r': 0.25}, 'B': {**base, 'pos': [dist, dist], 'frustum_h': 2.0, 'base_cyl_h': 1.0, 'main_cyl_h': 5.0, 'frustum_r_top': 0.5, 'base_cyl_r': 0.5, 'main_cyl_r': 0.25}, 'C': {**base, 'pos': [dist, -dist], 'frustum_h': 2.0, 'base_cyl_h': 1.0, 'main_cyl_h': 5.0, 'frustum_r_top': 0.5, 'base_cyl_r': 0.5, 'main_cyl_r': 0.25}, 'D': {**base, 'pos': [-dist, -dist], 'frustum_h': 2.0, 'base_cyl_h': 1.0, 'main_cyl_h': 5.0, 'frustum_r_top': 0.5, 'base_cyl_r': 0.5, 'main_cyl_r': 0.25}}, "Model B (背高)": { 'A': {**base, 'frustum_h': 3.0, 'base_cyl_h': 1.5, 'main_cyl_h': 8.0, 'frustum_r_top': 0.4, 'base_cyl_r': 0.4, 'main_cyl_r': 0.2}, 'B': {**base, 'pos': [dist, dist], 'frustum_h': 3.0, 'base_cyl_h': 1.5, 'main_cyl_h': 8.0, 'frustum_r_top': 0.4, 'base_cyl_r': 0.4, 'main_cyl_r': 0.2}, 'C': {**base, 'pos': [dist, -dist], 'frustum_h': 3.0, 'base_cyl_h': 1.5, 'main_cyl_h': 8.0, 'frustum_r_top': 0.4, 'base_cyl_r': 0.4, 'main_cyl_r': 0.2}, 'D': {**base, 'pos': [-dist, -dist], 'frustum_h': 3.0, 'base_cyl_h': 1.5, 'main_cyl_h': 8.0, 'frustum_r_top': 0.4, 'base_cyl_r': 0.4, 'main_cyl_r': 0.2}}, "Model C (寸胴)": { 'A': {**base, 'frustum_r_bottom': 3.0, 'frustum_h': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0, 'frustum_r_top': 1.5, 'base_cyl_r': 1.5, 'main_cyl_r': 1.0}, 'B': {**base, 'pos': [dist, dist], 'frustum_r_bottom': 3.0, 'frustum_h': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0, 'frustum_r_top': 1.5, 'base_cyl_r': 1.5, 'main_cyl_r': 1.0}, 'C': {**base, 'pos': [dist, -dist], 'frustum_r_bottom': 3.0, 'frustum_h': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0, 'frustum_r_top': 1.5, 'base_cyl_r': 1.5, 'main_cyl_r': 1.0}, 'D': {**base, 'pos': [-dist, -dist], 'frustum_r_bottom': 3.0, 'frustum_h': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0, 'frustum_r_top': 1.5, 'base_cyl_r': 1.5, 'main_cyl_r': 1.0}}, }
+    """円錐台のパラメータを削除したモデル定義"""
+    dist = 7.0 / 2.0
+    base = {'pos': [-dist, dist], 'base_cyl_r': 2.5, 'main_cyl_r': 0.5}
+    models = {
+        "Model A (標準)": {
+            'A': {**base, 'base_cyl_h': 1.5, 'main_cyl_h': 6.0},
+            'B': {**base, 'pos': [dist, dist], 'base_cyl_h': 1.5, 'main_cyl_h': 6.0},
+            'C': {**base, 'pos': [dist, -dist], 'base_cyl_h': 1.5, 'main_cyl_h': 6.0},
+            'D': {**base, 'pos': [-dist, -dist], 'base_cyl_h': 1.5, 'main_cyl_h': 6.0},
+        },
+        "Model B (背高)": {
+            'A': {**base, 'base_cyl_h': 2.0, 'main_cyl_h': 8.0},
+            'B': {**base, 'pos': [dist, dist], 'base_cyl_h': 2.0, 'main_cyl_h': 8.0},
+            'C': {**base, 'pos': [dist, -dist], 'base_cyl_h': 2.0, 'main_cyl_h': 8.0},
+            'D': {**base, 'pos': [-dist, -dist], 'base_cyl_h': 2.0, 'main_cyl_h': 8.0},
+        },
+        "Model C (寸胴)": {
+            'A': {**base, 'base_cyl_r': 3.0, 'main_cyl_r': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0},
+            'B': {**base, 'pos': [dist, dist], 'base_cyl_r': 3.0, 'main_cyl_r': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0},
+            'C': {**base, 'pos': [dist, -dist], 'base_cyl_r': 3.0, 'main_cyl_r': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0},
+            'D': {**base, 'pos': [-dist, -dist], 'base_cyl_r': 3.0, 'main_cyl_r': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0},
+        },
+    }
     return models
 
 def create_pillar_config_from_df(df):
-    config = {}; required_cols = {'id', 'x', 'y', 'frustum_h', 'base_cyl_h', 'main_cyl_h', 'frustum_r_bottom', 'frustum_r_top', 'base_cyl_r', 'main_cyl_r'}
+    """円錐台のパラメータを削除したCSV読み込み"""
+    config = {}; required_cols = {'id', 'x', 'y', 'base_cyl_h', 'main_cyl_h', 'base_cyl_r', 'main_cyl_r'}
     try:
         if not required_cols.issubset(df.columns):
             missing = required_cols - set(df.columns); st.error(f"柱CSVファイルに必須の列がありません: {', '.join(missing)}"); return None
@@ -162,61 +156,43 @@ with st.sidebar.expander("✏️ 画面上で線を描画", expanded=True):
     if st.button("全ての描画線を削除"): st.session_state.lines, st.session_state.drawing_points = [], []; st.rerun()
 
 st.title("カスタム3Dビルダー")
-
-# === メイン画面の操作パネル (エラー修正箇所) ===
 if pillars_config:
     st.subheader("各脚の操作と埋設体積")
     cols = st.columns(len(pillars_config))
-    # zipを使って、UIの列と柱のデータを正しく組み合わせる
     for col, (pillar_id, config) in zip(cols, pillars_config.items()):
         with col:
             st.markdown(f"**{pillar_id}脚**")
             if st.button(f"⬆️##{pillar_id}",use_container_width=True): st.session_state.pillar_offsets[pillar_id]+=0.5; st.rerun()
             if st.button(f"⬇️##{pillar_id}",use_container_width=True): st.session_state.pillar_offsets[pillar_id]-=0.5; st.rerun()
-            
             x,y=config['pos']; z_off=st.session_state.pillar_offsets[pillar_id]
-            total_h=config['frustum_h']+config['base_cyl_h']+config['main_cyl_h']
+            total_h=config['base_cyl_h']+config['main_cyl_h']
             init_z=get_plane_z(x,y)-(total_h*4/5)
-            f_pos=[x,y,init_z+z_off]; b_pos=[f_pos[0],f_pos[1],f_pos[2]+config['frustum_h']]
-            
-            v1,_=create_frustum_mesh(f_pos,config['frustum_r_bottom'],config['frustum_r_top'],config['frustum_h'])
-            v2,_=create_cylinder_mesh(b_pos,config['base_cyl_r'],config['base_cyl_h'])
-            vol=calculate_buried_volume_for_one_pillar([v1,v2], get_plane_z)
-            
+            b_pos=[x,y,init_z+z_off]
+            v1,_=create_cylinder_mesh(b_pos,config['base_cyl_r'],config['base_cyl_h'])
+            vol=calculate_buried_volume_for_one_pillar([v1], get_plane_z)
             st.markdown("埋設体積"); st.subheader(f"{vol:.2f} m³")
 
-# === 3Dグラフ描画 (エラー修正箇所) ===
+# 3Dグラフ描画
 fig = go.Figure()
-
-# 敷地
 if site_vertices is not None and len(site_vertices) > 0:
     verts, faces = create_mesh_from_vertices(site_vertices)
     if verts.size > 0: 
-        fig.add_trace(go.Mesh3d(
-            x=verts[:,0],y=verts[:,1],z=verts[:,2],
-            i=faces[:,0],j=faces[:,1],k=faces[:,2],
-            color='burlywood',opacity=0.7, name="Site"
-        ))
+        fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='burlywood',opacity=0.7))
 
-# 柱
 if pillars_config:
     for pillar_id, config in pillars_config.items():
-        x,y=config['pos']; z_off=st.session_state.pillar_offsets[pillar_id]; total_h=config['frustum_h']+config['base_cyl_h']+config['main_cyl_h']
+        x,y=config['pos']; z_off=st.session_state.pillar_offsets[pillar_id]; total_h=config['base_cyl_h']+config['main_cyl_h']
         init_z=get_plane_z(x,y)-(total_h*4/5)
         
-        f_pos=[x,y,init_z+z_off]
-        b_pos=[f_pos[0],f_pos[1],f_pos[2]+config['frustum_h']]
+        b_pos=[x,y,init_z+z_off]
         m_pos=[b_pos[0],b_pos[1],b_pos[2]+config['base_cyl_h']]
         l_s=[m_pos[0],m_pos[1],m_pos[2]+config['main_cyl_h']]
         l_e=[l_s[0],l_s[1],l_s[2]+1.5]
         
         # 各パーツのメッシュを生成して描画
-        verts, faces = create_frustum_mesh(f_pos,config['frustum_r_bottom'],config['frustum_r_top'],config['frustum_h'])
-        fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='gray'))
-        
         verts, faces = create_cylinder_mesh(b_pos,config['base_cyl_r'],config['base_cyl_h'])
         fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='darkgrey'))
-
+        
         verts, faces = create_cylinder_mesh(m_pos,config['main_cyl_r'],config['main_cyl_h'])
         fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='lightslategray'))
         
