@@ -160,31 +160,6 @@ all_pillar_verts = []
 all_pillar_faces = []
 all_pillar_colors = []
 
-if pillars_config:
-    for pillar_id, config in pillars_config.items():
-        x, y = config['pos']
-        z_off = st.session_state.pillar_offsets[pillar_id]
-        total_h = config['base_cyl_h'] + config['main_cyl_h']
-        init_z = get_plane_z(x, y) - (total_h * 4/5)
-        
-        # パーツの位置
-        base_pos = [x, y, init_z + z_off]
-        main_pos = [base_pos[0], base_pos[1], base_pos[2] + config['base_cyl_h']]
-        
-        # ベース円柱
-        current_vert_offset = len(all_pillar_verts)
-        verts, faces = create_cylinder_mesh(base_pos, config['base_cyl_r'], config['base_cyl_h'])
-        all_pillar_verts.extend(verts)
-        all_pillar_faces.extend(faces + current_vert_offset)
-        all_pillar_colors.extend(['darkgrey'] * len(verts))
-
-        # メイン円柱
-        current_vert_offset = len(all_pillar_verts)
-        verts, faces = create_cylinder_mesh(main_pos, config['main_cyl_r'], config['main_cyl_h'])
-        all_pillar_verts.extend(verts)
-        all_pillar_faces.extend(faces + current_vert_offset)
-        all_pillar_colors.extend(['lightslategray'] * len(verts))
-
         # 上部の赤い線は個別に追加
         line_start = [main_pos[0], main_pos[1], main_pos[2] + config['main_cyl_h']]
         line_end = [line_start[0], line_start[1], line_start[2] + 1.5]
