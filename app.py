@@ -34,38 +34,35 @@ def get_plane_z(x, y, slope_degrees=30):
 def create_mesh_from_vertices(vertices):
     """頂点群からDelaunay三角分割でメッシュを作成する"""
     try:
+        if vertices is None or vertices.shape[0] < 3: return np.array([]), np.array([])
         points_2d = vertices[:, :2]
-        if points_2d.shape[0] < 3: return np.array([]), np.array([])
         tri = Delaunay(points_2d)
         return vertices, tri.simplices
     except Exception:
         return np.array([]), np.array([])
 
 def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
-    """円柱のメッシュを作成 (上面・底面あり)"""
+    """円柱の頂点と面データを生成する（ローカル座標）"""
     theta = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
-    x, y = radius * np.cos(theta), radius * np.sin(theta)
+    x_c, y_c = radius * np.cos(theta), radius * np.sin(theta)
     
     verts = []
-    # Bottom circle (indices 0 to n-1)
-    for i in range(n_segments): verts.append([x[i], y[i], 0])
-    # Top circle (indices n to 2n-1)
-    for i in range(n_segments): verts.append([x[i], y[i], height])
-    verts.append([0, 0, 0])      # Bottom center (index: 2n)
-    verts.append([0, 0, height]) # Top center (index: 2n+1)
+    # Bottom, Top, Center points
+    for i in range(n_segments): verts.append([x_c[i], y_c[i], 0])
+    for i in range(n_segments): verts.append([x_c[i], y_c[i], height])
+    verts.append([0, 0, 0]); verts.append([0, 0, height])
     
     verts = np.array(verts, dtype=float) + np.array(center_pos, dtype=float)
     
     faces = []
-    # Side faces
+    # Sides
     for i in range(n_segments):
         next_i = (i + 1) % n_segments
-        faces.append([i, next_i, i + n_segments])
-        faces.append([next_i, next_i + n_segments, i + n_segments])
-    # Bottom cap
-    for i in range(n_segments): faces.append([i, (i + 1) % n_segments, 2 * n_segments])
-    # Top cap
-    for i in range(n_segments): faces.append([i + n_segments, ((i + 1) % n_segments) + n_segments, 2 * n_segments + 1])
+        faces.extend([[i, next_i, i + n_segments], [next_i, i + n_segments, next_i + n_segments]])
+    # Caps
+    for i in range(n_segments):
+        faces.append([i, (i + 1) % n_segments, 2 * n_segments])
+        faces.append([i + n_segments, ((i + 1) % n_segments) + n_segments, 2 * n_segments + 1])
         
     return verts, np.array(faces, dtype=int)
 
@@ -87,33 +84,11 @@ def get_default_site_data():
     return np.c_[xv.ravel(), yv.ravel(), z.ravel()]
 
 def get_predefined_pillar_models():
-    """円錐台のパラメータを削除したモデル定義"""
-    dist = 7.0 / 2.0
-    base = {'pos': [-dist, dist], 'base_cyl_r': 2.5, 'main_cyl_r': 0.5}
-    models = {
-        "Model A (標準)": {
-            'A': {**base, 'base_cyl_h': 1.5, 'main_cyl_h': 6.0},
-            'B': {**base, 'pos': [dist, dist], 'base_cyl_h': 1.5, 'main_cyl_h': 6.0},
-            'C': {**base, 'pos': [dist, -dist], 'base_cyl_h': 1.5, 'main_cyl_h': 6.0},
-            'D': {**base, 'pos': [-dist, -dist], 'base_cyl_h': 1.5, 'main_cyl_h': 6.0},
-        },
-        "Model B (背高)": {
-            'A': {**base, 'base_cyl_h': 2.0, 'main_cyl_h': 8.0},
-            'B': {**base, 'pos': [dist, dist], 'base_cyl_h': 2.0, 'main_cyl_h': 8.0},
-            'C': {**base, 'pos': [dist, -dist], 'base_cyl_h': 2.0, 'main_cyl_h': 8.0},
-            'D': {**base, 'pos': [-dist, -dist], 'base_cyl_h': 2.0, 'main_cyl_h': 8.0},
-        },
-        "Model C (寸胴)": {
-            'A': {**base, 'base_cyl_r': 3.0, 'main_cyl_r': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0},
-            'B': {**base, 'pos': [dist, dist], 'base_cyl_r': 3.0, 'main_cyl_r': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0},
-            'C': {**base, 'pos': [dist, -dist], 'base_cyl_r': 3.0, 'main_cyl_r': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0},
-            'D': {**base, 'pos': [-dist, -dist], 'base_cyl_r': 3.0, 'main_cyl_r': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0},
-        },
-    }
+    dist = 7.0 / 2.0; base = {'pos': [-dist, dist], 'base_cyl_r': 2.5, 'main_cyl_r': 0.5}
+    models = { "Model A (標準)": { 'A': {**base, 'base_cyl_h': 1.5, 'main_cyl_h': 6.0}, 'B': {**base, 'pos': [dist, dist], 'base_cyl_h': 1.5, 'main_cyl_h': 6.0}, 'C': {**base, 'pos': [dist, -dist], 'base_cyl_h': 1.5, 'main_cyl_h': 6.0}, 'D': {**base, 'pos': [-dist, -dist], 'base_cyl_h': 1.5, 'main_cyl_h': 6.0}}, "Model B (背高)": { 'A': {**base, 'base_cyl_h': 2.0, 'main_cyl_h': 8.0}, 'B': {**base, 'pos': [dist, dist], 'base_cyl_h': 2.0, 'main_cyl_h': 8.0}, 'C': {**base, 'pos': [dist, -dist], 'base_cyl_h': 2.0, 'main_cyl_h': 8.0}, 'D': {**base, 'pos': [-dist, -dist], 'base_cyl_h': 2.0, 'main_cyl_h': 8.0}}, "Model C (寸胴)": { 'A': {**base, 'base_cyl_r': 3.0, 'main_cyl_r': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0}, 'B': {**base, 'pos': [dist, dist], 'base_cyl_r': 3.0, 'main_cyl_r': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0}, 'C': {**base, 'pos': [dist, -dist], 'base_cyl_r': 3.0, 'main_cyl_r': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0}, 'D': {**base, 'pos': [-dist, -dist], 'base_cyl_r': 3.0, 'main_cyl_r': 1.5, 'base_cyl_h': 1.0, 'main_cyl_h': 4.0}}, }
     return models
 
 def create_pillar_config_from_df(df):
-    """円錐台のパラメータを削除したCSV読み込み"""
     config = {}; required_cols = {'id', 'x', 'y', 'base_cyl_h', 'main_cyl_h', 'base_cyl_r', 'main_cyl_r'}
     try:
         if not required_cols.issubset(df.columns):
@@ -172,32 +147,60 @@ if pillars_config:
             vol=calculate_buried_volume_for_one_pillar([v1], get_plane_z)
             st.markdown("埋設体積"); st.subheader(f"{vol:.2f} m³")
 
-# 3Dグラフ描画
+# --- 3Dグラフ描画 ---
 fig = go.Figure()
+# 敷地
 if site_vertices is not None and len(site_vertices) > 0:
     verts, faces = create_mesh_from_vertices(site_vertices)
     if verts.size > 0: 
-        fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='burlywood',opacity=0.7))
+        fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='burlywood',opacity=0.7, name="Site"))
+
+# 全ての柱を一つのメッシュとして統合
+all_pillar_verts = []
+all_pillar_faces = []
+all_pillar_colors = []
 
 if pillars_config:
     for pillar_id, config in pillars_config.items():
-        x,y=config['pos']; z_off=st.session_state.pillar_offsets[pillar_id]; total_h=config['base_cyl_h']+config['main_cyl_h']
-        init_z=get_plane_z(x,y)-(total_h*4/5)
+        x, y = config['pos']
+        z_off = st.session_state.pillar_offsets[pillar_id]
+        total_h = config['base_cyl_h'] + config['main_cyl_h']
+        init_z = get_plane_z(x, y) - (total_h * 4/5)
         
-        b_pos=[x,y,init_z+z_off]
-        m_pos=[b_pos[0],b_pos[1],b_pos[2]+config['base_cyl_h']]
-        l_s=[m_pos[0],m_pos[1],m_pos[2]+config['main_cyl_h']]
-        l_e=[l_s[0],l_s[1],l_s[2]+1.5]
+        # パーツの位置
+        base_pos = [x, y, init_z + z_off]
+        main_pos = [base_pos[0], base_pos[1], base_pos[2] + config['base_cyl_h']]
         
-        # 各パーツのメッシュを生成して描画
-        verts, faces = create_cylinder_mesh(b_pos,config['base_cyl_r'],config['base_cyl_h'])
-        fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='darkgrey'))
-        
-        verts, faces = create_cylinder_mesh(m_pos,config['main_cyl_r'],config['main_cyl_h'])
-        fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=faces[:,0],j=faces[:,1],k=faces[:,2],color='lightslategray'))
-        
-        fig.add_trace(go.Scatter3d(x=[l_s[0],l_e[0]],y=[l_s[1],l_e[1]],z=[l_s[2],l_e[2]],mode='lines',line=dict(color='red',width=7)))
+        # ベース円柱
+        current_vert_offset = len(all_pillar_verts)
+        verts, faces = create_cylinder_mesh(base_pos, config['base_cyl_r'], config['base_cyl_h'])
+        all_pillar_verts.extend(verts)
+        all_pillar_faces.extend(faces + current_vert_offset)
+        all_pillar_colors.extend(['darkgrey'] * len(verts))
 
+        # メイン円柱
+        current_vert_offset = len(all_pillar_verts)
+        verts, faces = create_cylinder_mesh(main_pos, config['main_cyl_r'], config['main_cyl_h'])
+        all_pillar_verts.extend(verts)
+        all_pillar_faces.extend(faces + current_vert_offset)
+        all_pillar_colors.extend(['lightslategray'] * len(verts))
+
+        # 上部の赤い線は個別に追加
+        line_start = [main_pos[0], main_pos[1], main_pos[2] + config['main_cyl_h']]
+        line_end = [line_start[0], line_start[1], line_start[2] + 1.5]
+        fig.add_trace(go.Scatter3d(x=[line_start[0],line_end[0]],y=[line_start[1],line_end[1]],z=[line_start[2],line_end[2]],mode='lines',line=dict(color='red',width=7)))
+
+if all_pillar_verts:
+    verts_np = np.array(all_pillar_verts)
+    faces_np = np.array(all_pillar_faces)
+    fig.add_trace(go.Mesh3d(
+        x=verts_np[:, 0], y=verts_np[:, 1], z=verts_np[:, 2],
+        i=faces_np[:, 0], j=faces_np[:, 1], k=faces_np[:, 2],
+        vertexcolor=all_pillar_colors,
+        name="Pillars"
+    ))
+
+# 描画した線など
 if st.session_state.drawing_points: fig.add_trace(go.Scatter3d(x=[st.session_state.drawing_points[0]['x']],y=[st.session_state.drawing_points[0]['y']],z=[st.session_state.drawing_points[0]['z']],mode='markers',marker=dict(color='magenta',size=10,symbol='cross')))
 for line in st.session_state.lines: fig.add_trace(go.Scatter3d(x=[line["start"]['x'],line["end"]['x']],y=[line["start"]['y'],line["end"]['y']],z=[line["start"]['z'],line["end"]['z']],mode='lines',line=dict(color='cyan',width=5)))
 fig.update_layout(scene=dict(xaxis=dict(title='X(m)',range=[-10,10]),yaxis=dict(title='Y(m)',range=[-10,10]),zaxis=dict(title='Z(m)',range=[-10,10]),aspectratio=dict(x=1,y=1,z=1)),margin=dict(l=0,r=0,b=0,t=40),showlegend=False)
