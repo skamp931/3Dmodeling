@@ -31,7 +31,7 @@ def create_mesh_from_vertices(vertices):
         return np.array([]), np.array([])
 
 def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
-    """【修正版】円柱の頂点と面データを生成する"""
+    """円柱の頂点と面データを生成する"""
     theta = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
     x_c = radius * np.cos(theta)
     y_c = radius * np.sin(theta)
@@ -59,7 +59,7 @@ def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
     return verts, np.array(faces, dtype=int)
 
 def create_slanted_frustum_mesh(center_pos, bottom_radius, top_radius, top_z, plane_func, n_segments=32):
-    """【修正版】敷地面に沿った円錐台のメッシュを生成する"""
+    """敷地面に沿った円錐台のメッシュを生成する"""
     theta = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
     
     verts = []
@@ -117,14 +117,11 @@ def get_default_site_data():
 
 def get_default_pillars_config():
     dist = 7.0 / 2.0
-    # 下の円柱(土台)の半径を定義
-    base_cyl_radius = 2.0 # 直径を2倍にするので、半径も2倍 (1.0 -> 2.0)
+    base_cyl_radius = 2.0
     
-    # 基礎部分(円錐台)の寸法を定義
-    foundation_top_radius = base_cyl_radius # 土台と接続するので同じ半径
-    foundation_bottom_radius = foundation_top_radius * 3.0 # 基礎の下側は、その上側の3倍
+    foundation_top_radius = base_cyl_radius
+    foundation_bottom_radius = foundation_top_radius * 3.0
 
-    # 上の円柱(メイン)の半径
     main_cyl_radius = 0.5
 
     config = {
@@ -156,16 +153,31 @@ pillar_volumes = {}
 for pillar_id, config in pillars_config.items():
     x, y = config['pos']
     z_off = st.session_state.pillar_offsets.get(pillar_id, 0.0)
-    total_h = config['base_cyl_h'] + config['main_cyl_h'] 
-    init_z = get_plane_z(x, y) - (total_h * 4/5)
-    
-    base_pos_z = init_z + z_off
+
+    # --- ▼▼▼ Z座標の計算ロジックを修正 ▼▼▼ ---
+    # 1. 柱の中心における敷地面の高さを取得
+    ground_z = get_plane_z(x, y)
+
+    # 2. 基礎(緑の円錐台)の高さを定義
+    #    依頼に基づき、「柱(土台+メイン円柱)の高さ」の4/5を基礎の高さとします。
+    pillar_on_foundation_h = config['base_cyl_h'] + config['main_cyl_h']
+    foundation_h = pillar_on_foundation_h * (4 / 5)
+
+    # 3. 各パーツのZ座標を決定
+    #    土台円柱の底面 (＝基礎の上面) のZ座標
+    #    基礎は地面に埋まるため、敷地面の高さから基礎の高さを引きます。
+    #    その後、ユーザー操作による上下移動オフセットを加えます。
+    base_pos_z = ground_z - foundation_h + z_off
+
+    #    メイン円柱の底面のZ座標
     main_pos_z = base_pos_z + config['base_cyl_h']
-    
+
+    # 4. 描画用の座標データを設定
     base_pos = [x, y, base_pos_z]
     main_pos = [x, y, main_pos_z]
+    # --- ▲▲▲ Z座標の計算ロジックを修正 ▲▲▲ ---
     
-    # --- 新しい基礎柱（計算対象）---
+    # --- 基礎柱（緑色の円錐台）---
     foundation_verts, foundation_faces = create_slanted_frustum_mesh(
         [x, y, 0], config['foundation_r_bottom'], config['foundation_r_top'], base_pos_z, get_plane_z
     )
