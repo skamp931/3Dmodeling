@@ -146,7 +146,7 @@ def get_default_pillars_config():
     """柱の基本設定を定義する"""
     dist = 7.0 / 2.0; top_r = 1.0; bottom_r = top_r * 3.0
     main_cyl_height = 6.0
-    # ▼▼▼【変更点2】円錐台の高さを主柱の4/5にする ▼▼▼
+    # 円錐台の高さを主柱の4/5にする
     foundation_height = main_cyl_height * 4 / 5 # 4.8m
     return {
         'A': {'pos': [-dist, dist], 'foundation_h': foundation_height, 'foundation_r_bottom': bottom_r, 'foundation_r_top': top_r, 'base_cyl_r': top_r, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': main_cyl_height},
@@ -173,14 +173,14 @@ pillar_volumes = {}
 for pillar_id, config in pillars_config.items():
     x, y = config['pos']; z_off = st.session_state.pillar_offsets.get(pillar_id, 0.0)
 
-    # ▼▼▼【変更点1】柱が必ず敷地から上にはみ出るようにZ座標の計算方法を変更 ▼▼▼
+    # ▼▼▼【変更点】「1/5はみ出す」という制限をなくし、敷地の高さとボタン操作のオフセットで高さを決めるように変更 ▼▼▼
     # 敷地の(x,y)地点でのZ座標
     site_z_at_pillar = get_plane_z(x, y)
     
-    # 柱（円柱部分）の底面が敷地の高さにくるように設定（オフセットも加味）
+    # 土台の円柱の底面を、敷地の高さに設定（ボタンによるオフセットも加味）
     base_pos_z = site_z_at_pillar + z_off
     
-    # 基礎（円錐台）は柱の下に配置されるため、その分だけZ座標を下げる
+    # 基礎（円錐台）は土台の円柱の下に配置
     foundation_pos_z = base_pos_z - config['foundation_h']
     
     # 主柱は土台の円柱の上に配置
@@ -189,7 +189,7 @@ for pillar_id, config in pillars_config.items():
     foundation_pos = [x, y, foundation_pos_z]
     base_pos = [x, y, base_pos_z]
     main_pos = [x, y, main_pos_z]
-    # ▲▲▲【変更点1】ここまで ▲▲▲
+    # ▲▲▲【変更点】ここまで ▲▲▲
 
     # 基礎（円錐台）の描画。物理的に正しい向き（下が広く、上が狭い）に変更。
     frustum_verts, frustum_faces = create_frustum_mesh(
@@ -241,7 +241,7 @@ for pillar_id, config in pillars_config.items():
 
 # グラフのレイアウト設定
 fig.update_layout(
-    title_text="敷地と柱の3Dビューア（構造修正版）",
+    title_text="敷地と柱の3Dビューア（高さ制限解除版）",
     scene=dict(xaxis=dict(title='X (m)',range=[-10,10]),yaxis=dict(title='Y (m)',range=[-10,10]),zaxis=dict(title='Z (m)',range=[-15,15]),aspectratio=dict(x=1,y=1,z=1)),
     margin=dict(l=0,r=0,b=0,t=40),
     showlegend=False
