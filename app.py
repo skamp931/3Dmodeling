@@ -162,9 +162,7 @@ if pillars_config:
     for i, (pillar_id, config) in enumerate(pillars_config.items()):
         with cols[i]:
             st.markdown(f"**{pillar_id}脚**")
-            # === エラー修正箇所 ===
-            # 状態を変更した直後に st.rerun() を呼び出し、スクリプトを再実行させます。
-            # これにより、UIの状態が常にクリーンに保たれ、エラーを防ぎます。
+            
             if st.button(f"⬆️##{pillar_id}",use_container_width=True):
                 st.session_state.pillar_offsets[pillar_id]+=0.5
                 st.rerun()
@@ -172,15 +170,20 @@ if pillars_config:
                 st.session_state.pillar_offsets[pillar_id]-=0.5
                 st.rerun()
             
-            x_pos, y_pos = config['pos']; z_offset = st.session_state.pillar_offsets[pillar_id]
-            total_h = config['frustum_h']+config['base_cyl_h']+config['main_cyl_h']
+            x_pos, y_pos = config.get('pos', [0, 0]); z_offset = st.session_state.pillar_offsets.get(pillar_id, 0.0)
+            total_h = config.get('frustum_h',0)+config.get('base_cyl_h',0)+config.get('main_cyl_h',0)
             initial_z_base = get_plane_z(x_pos,y_pos) - (total_h*4/5)
             frustum_pos = [x_pos,y_pos,initial_z_base+z_offset]
-            base_cyl_pos = [frustum_pos[0],frustum_pos[1],frustum_pos[2]+config['frustum_h']]
-            v1,_=create_frustum_mesh(frustum_pos, config['frustum_r_bottom'], config['frustum_r_top'], config['frustum_h'])
-            v2,_=create_cylinder_mesh(base_cyl_pos, config['base_cyl_r'], config['base_cyl_h'])
+            base_cyl_pos = [frustum_pos[0],frustum_pos[1],frustum_pos[2]+config.get('frustum_h',0)]
+            v1,_=create_frustum_mesh(frustum_pos, config.get('frustum_r_bottom',0), config.get('frustum_r_top',0), config.get('frustum_h',0))
+            v2,_=create_cylinder_mesh(base_cyl_pos, config.get('base_cyl_r',0), config.get('base_cyl_h',0))
             vol=calculate_buried_volume_for_one_pillar([v1,v2], get_plane_z)
-            st.metric(label="埋設体積", value=f"{vol:.2f} m³", key=f"vol_{pillar_id}")
+
+            # === エラー修正箇所 ===
+            # st.metric の代わりに st.markdown と st.subheader を使用します。
+            # これにより 'key' 引数が不要になり、エラーが解消されます。
+            st.markdown("埋設体積")
+            st.subheader(f"{vol:.2f} m³")
 
 # --- 3Dグラフ描画 ---
 fig = go.Figure()
