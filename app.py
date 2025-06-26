@@ -28,29 +28,35 @@ def create_mesh_from_vertices(vertices):
 def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
     theta = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
     x_c, y_c = radius * np.cos(theta), radius * np.sin(theta)
+    
     verts = []
     for i in range(n_segments): verts.append([x_c[i], y_c[i], 0])
     for i in range(n_segments): verts.append([x_c[i], y_c[i], height])
     verts.extend([[0, 0, 0], [0, 0, height]])
     verts = np.array(verts, dtype=float) + np.array(center_pos, dtype=float)
+    
     faces = []
     for i in range(n_segments):
         next_i = (i + 1) % n_segments
         top_i, top_next_i = i + n_segments, next_i + n_segments
-        faces.extend([[i, next_i, top_next_i], [i, top_next_i, top_i]])
-        faces.append([i, next_i, 2 * n_segments])
+        # Side faces
+        faces.append([i, next_i, top_next_i])
+        faces.append([i, top_next_i, top_i])
+        # Bottom cap
+        faces.append([next_i, i, 2 * n_segments])
+        # Top cap
         faces.append([top_i, top_next_i, 2 * n_segments + 1])
     return verts, np.array(faces, dtype=int)
 
 def create_frustum_mesh(center_pos, bottom_radius, top_radius, height, n_segments=32):
-    """【修正版】円錐台のメッシュを確実に生成する"""
+    """【最終修正版】円錐台のメッシュを確実に生成する"""
     theta = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
     
     verts = []
-    # Bottom circle vertices
+    # Bottom circle vertices (indices 0 to n-1)
     for angle in theta:
         verts.append([bottom_radius * np.cos(angle), bottom_radius * np.sin(angle), 0])
-    # Top circle vertices
+    # Top circle vertices (indices n to 2n-1)
     for angle in theta:
         verts.append([top_radius * np.cos(angle), top_radius * np.sin(angle), height])
     
@@ -64,40 +70,42 @@ def create_frustum_mesh(center_pos, bottom_radius, top_radius, height, n_segment
     faces = []
     for i in range(n_segments):
         i_next = (i + 1) % n_segments
-        top_i, top_i_next = i + n_segments, i_next + n_segments
+        top_i = i + n_segments
+        top_i_next = i_next + n_segments
         
-        # Side faces (two triangles per quad)
-        faces.extend([[i, i_next, top_i], [i_next, top_i_next, top_i]])
+        # Side faces (two triangles per quad, with correct winding)
+        faces.append([i, i_next, top_i_next])
+        faces.append([i, top_i_next, top_i])
         
-        # Bottom cap
-        faces.append([i, i_next, 2 * n_segments])
+        # Bottom cap (winding order for looking from top)
+        faces.append([i_next, i, 2 * n_segments])
         
         # Top cap
         faces.append([top_i, top_i_next, 2 * n_segments + 1])
         
     return verts, np.array(faces, dtype=int)
 
-def get_intersection_polygon(vertices, faces, plane_func):
+
+def get_intersection_polygon(vertices, plane_func):
     """円錐台と平面の交差ポリゴンを計算"""
     intersection_points = []
-    edges = set()
-    for face in faces:
-        for i in range(3):
-            start_idx, end_idx = face[i], face[(i + 1) % 3]
-            if start_idx > end_idx: start_idx, end_idx = end_idx, start_idx
-            edges.add((start_idx, end_idx))
-            
-    for start_idx, end_idx in edges:
-        p1, p2 = vertices[start_idx], vertices[end_idx]
+    
+    # Check all edges for intersection
+    # This simplified approach checks edges of the side faces only
+    n_segments = (len(vertices) - 2) // 2
+    for i in range(n_segments):
+        p1 = vertices[i] # bottom vertex
+        p2 = vertices[i + n_segments] # top vertex
+        
         d1 = p1[2] - plane_func(p1[0], p1[1])
         d2 = p2[2] - plane_func(p2[0], p2[1])
         
         if d1 * d2 < 0:
-            ratio = d1 / (d1 - d2) if (d1-d2) != 0 else 0.5
-            intersect_pt = p1 + ratio * (p2 - p1) # Corrected interpolation
+            ratio = d1 / (d1 - d2) if (d1 - d2) != 0 else 0.5
+            intersect_pt = p1 - ratio * (p2 - p1)
             intersection_points.append(intersect_pt)
     
-    if not intersection_points: return np.array([])
+    if len(intersection_points) < 3: return np.array([])
     
     points = np.array(intersection_points)
     center = np.mean(points, axis=0)
@@ -107,7 +115,6 @@ def get_intersection_polygon(vertices, faces, plane_func):
     return np.vstack([sorted_points, sorted_points[0]])
 
 def calculate_volumes(verts, plane_func, samples=5000):
-    """【修正版】頂点群の上部・下部の体積を計算"""
     if verts is None or verts.size == 0: return 0, 0
     min_c, max_c = verts.min(axis=0), verts.max(axis=0)
     dims = max_c - min_c
@@ -160,7 +167,7 @@ for pillar_id, config in pillars_config.items():
     frustum_verts, frustum_faces = create_frustum_mesh(foundation_pos, config['foundation_r_bottom'], config['foundation_r_top'], config['foundation_h'])
     fig.add_trace(go.Mesh3d(x=frustum_verts[:,0], y=frustum_verts[:,1], z=frustum_verts[:,2], i=frustum_faces[:,0],j=frustum_faces[:,1],k=frustum_faces[:,2], color='limegreen', opacity=0.3))
     
-    intersection_line = get_intersection_polygon(frustum_verts, frustum_faces, get_plane_z)
+    intersection_line = get_intersection_polygon(frustum_verts, get_plane_z)
     if intersection_line.size > 0:
         fig.add_trace(go.Scatter3d(x=intersection_line[:,0], y=intersection_line[:,1], z=intersection_line[:,2], mode='lines', line=dict(color='orange', width=8)))
 
