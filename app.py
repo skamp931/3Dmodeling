@@ -161,9 +161,9 @@ all_pillar_faces = []
 all_pillar_colors = []
 
         # 上部の赤い線は個別に追加
-        line_start = [main_pos[0], main_pos[1], main_pos[2] + config['main_cyl_h']]
-        line_end = [line_start[0], line_start[1], line_start[2] + 1.5]
-        fig.add_trace(go.Scatter3d(x=[line_start[0],line_end[0]],y=[line_start[1],line_end[1]],z=[line_start[2],line_end[2]],mode='lines',line=dict(color='red',width=7)))
+line_start = [main_pos[0], main_pos[1], main_pos[2] + config['main_cyl_h']]
+line_end = [line_start[0], line_start[1], line_start[2] + 1.5]
+fig.add_trace(go.Scatter3d(x=[line_start[0],line_end[0]],y=[line_start[1],line_end[1]],z=[line_start[2],line_end[2]],mode='lines',line=dict(color='red',width=7)))
 
 if all_pillar_verts:
     verts_np = np.array(all_pillar_verts)
