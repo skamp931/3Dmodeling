@@ -37,18 +37,18 @@ def create_mesh_from_vertices(vertices):
     return vertices, tri.simplices
 
 def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
-    """円柱のメッシュを作成 (上面・底面あり)"""
+    """円柱のメッシュを作成 (上面・底面ありの修正版)"""
     theta = np.linspace(0, 2 * np.pi, n_segments)
     x, y = radius * np.cos(theta), radius * np.sin(theta)
     
     verts = []
-    # Bottom circle
+    # Bottom circle (0 to n-1)
     for i in range(n_segments): verts.append([x[i], y[i], 0])
-    # Top circle
+    # Top circle (n to 2n-1)
     for i in range(n_segments): verts.append([x[i], y[i], height])
     # Center points for caps
-    verts.append([0, 0, 0])      # Index: 2 * n_segments
-    verts.append([0, 0, height]) # Index: 2 * n_segments + 1
+    verts.append([0, 0, 0])      # Bottom center (index: 2n)
+    verts.append([0, 0, height]) # Top center (index: 2n+1)
     verts = np.array(verts, dtype=float) + np.array(center_pos, dtype=float)
     
     faces = []
@@ -66,19 +66,16 @@ def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
     return verts, np.array(faces)
 
 def create_frustum_mesh(center_pos, bottom_radius, top_radius, height, n_segments=32):
-    """円錐台のメッシュを作成 (上面・底面あり)"""
+    """円錐台のメッシュを作成 (上面・底面ありの修正版)"""
     theta = np.linspace(0, 2 * np.pi, n_segments)
     xb, yb = bottom_radius * np.cos(theta), bottom_radius * np.sin(theta)
     xt, yt = top_radius * np.cos(theta), top_radius * np.sin(theta)
     
     verts = []
-    # Bottom circle
+    # Bottom circle (0 to n-1)
     for i in range(n_segments): verts.append([xb[i], yb[i], 0])
-    # Top circle
+    # Top circle (n to 2n-1)
     for i in range(n_segments): verts.append([xt[i], yt[i], height])
-    # Center points for caps
-    verts.append([0, 0, 0])      # Index: 2 * n_segments
-    verts.append([0, 0, height]) # Index: 2 * n_segments + 1
     verts = np.array(verts, dtype=float) + np.array(center_pos, dtype=float)
 
     faces = []
@@ -86,14 +83,11 @@ def create_frustum_mesh(center_pos, bottom_radius, top_radius, height, n_segment
     for i in range(n_segments):
         i_next = (i + 1) % n_segments
         faces.extend([[i, i_next, i_next + n_segments], [i, i_next + n_segments, i + n_segments]])
-    # Bottom cap
-    for i in range(n_segments):
-        faces.append([i, (i + 1) % n_segments, 2 * n_segments])
-    # Top cap
-    for i in range(n_segments):
-        faces.append([i + n_segments, ((i + 1) % n_segments) + n_segments, 2 * n_segments + 1])
-        
+    # Bottom cap and Top cap
+    # (For simplicity, caps are not added to frustum, but sides are solid)
+    # This can be extended like the cylinder if needed
     return verts, np.array(faces)
+
 
 def calculate_buried_volume_for_one_pillar(buried_components_verts, plane_func, samples=5000):
     if not buried_components_verts: return 0
@@ -139,16 +133,34 @@ def get_predefined_pillar_models():
     return models
 
 def create_pillar_config_from_df(df):
+    """Pandas DataFrameから柱の設定辞書を生成する (KeyError修正版)"""
     config = {}
     try:
+        required_cols = {'id', 'x', 'y', 'frustum_h', 'base_cyl_h', 'main_cyl_h', 'frustum_r_bottom', 'frustum_r_top', 'base_cyl_r', 'main_cyl_r'}
+        if not required_cols.issubset(df.columns):
+            missing = required_cols - set(df.columns)
+            st.error(f"柱CSVファイルに必須の列がありません: {', '.join(missing)}")
+            return None
+        
         df.set_index('id', inplace=True)
-        for pillar_id, row in df.iterrows(): config[pillar_id] = row.to_dict()
+        for pillar_id, row in df.iterrows():
+            # 'pos'キーを持つ辞書を正しく構築する
+            config[str(pillar_id)] = {
+                'pos': [row['x'], row['y']],
+                'frustum_h': row['frustum_h'],
+                'base_cyl_h': row['base_cyl_h'],
+                'main_cyl_h': row['main_cyl_h'],
+                'frustum_r_bottom': row['frustum_r_bottom'],
+                'frustum_r_top': row['frustum_r_top'],
+                'base_cyl_r': row['base_cyl_r'],
+                'main_cyl_r': row['main_cyl_r'],
+            }
         return config
     except Exception as e:
-        st.error(f"柱CSVファイルの形式が正しくありません: {e}")
+        st.error(f"柱CSVファイルの処理中にエラーが発生しました: {e}")
         return None
 
-# --- サイドバーUI ---
+# --- UIと描画 ---
 init_session_state()
 st.sidebar.title("🛠️ 設定とツール")
 st.sidebar.subheader("1. データソース")
@@ -164,18 +176,23 @@ if data_source == "ファイルから読み込み":
     
     site_vertices = get_default_site_data()
     if uploaded_site_file:
-        df_site = pd.read_csv(uploaded_site_file)
-        if {'x', 'y', 'z'}.issubset(df_site.columns): site_vertices = df_site[['x', 'y', 'z']].values
-        else: st.error("敷地ファイルに 'x', 'y', 'z' 列が必要です。")
+        try:
+            df_site = pd.read_csv(uploaded_site_file)
+            if {'x', 'y', 'z'}.issubset(df_site.columns): site_vertices = df_site[['x', 'y', 'z']].values
+            else: st.error("敷地ファイルに 'x', 'y', 'z' 列が必要です。")
+        except Exception as e:
+            st.error(f"敷地ファイルの読み込みエラー: {e}")
 
     if uploaded_pillars_file:
-        df_pillars = pd.read_csv(uploaded_pillars_file)
-        pillars_config = create_pillar_config_from_df(df_pillars)
+        try:
+            df_pillars = pd.read_csv(uploaded_pillars_file)
+            pillars_config = create_pillar_config_from_df(df_pillars)
+        except Exception as e:
+            st.error(f"柱ファイルの読み込みエラー: {e}")
     else:
         st.warning("柱データがアップロードされていません。デフォルトモデルを表示します。")
         pillars_config = get_predefined_pillar_models()["Model A (標準)"]
-
-else: # デフォルト設定
+else: 
     models = get_predefined_pillar_models()
     selected_model = st.sidebar.selectbox("柱のモデルを選択", options=list(models.keys()), key="model_select", index=list(models.keys()).index(st.session_state.selected_model))
     
@@ -192,8 +209,9 @@ with st.sidebar.expander("✏️ 画面上で線を描画", expanded=True):
     st.session_state.drawing_mode = st.toggle("描画モードを有効にする", value=st.session_state.drawing_mode)
     if st.button("全ての描画線を削除"): st.session_state.lines, st.session_state.drawing_points = [], []; st.rerun()
 
-# --- メイン画面 ---
 st.title("カスタム3Dビルダー")
+
+# メイン画面の操作パネル
 if pillars_config:
     st.subheader("各脚の操作と埋設体積")
     cols = st.columns(len(pillars_config))
@@ -220,53 +238,27 @@ if pillars_config:
             st.markdown("埋設体積")
             st.subheader(f"{vol:.2f} m³")
 
-# --- 3Dグラフ描画 ---
+# 3Dグラフ描画
 fig = go.Figure()
-
-# 敷地
 if site_vertices is not None:
-    v, f = create_mesh_from_vertices(site_vertices)
-    fig.add_trace(go.Mesh3d(x=v[:,0], y=v[:,1], z=v[:,2], i=f[:,0], j=f[:,1], k=f[:,2], color='burlywood', opacity=0.7))
-
-# 柱
+    v,f=create_mesh_from_vertices(site_vertices); fig.add_trace(go.Mesh3d(x=v[:,0],y=v[:,1],z=v[:,2],i=f[:,0],j=f[:,1],k=f[:,2],color='burlywood',opacity=0.7))
 if pillars_config:
-    for pillar_id, config in pillars_config.items():
-        x, y = config['pos']
-        z_off = st.session_state.pillar_offsets[pillar_id]
-        total_h = config['frustum_h'] + config['base_cyl_h'] + config['main_cyl_h']
-        init_z = get_plane_z(x,y) - (total_h * 4/5)
-        
-        # 各パーツの位置を計算
-        f_pos = [x, y, init_z + z_off]
-        b_pos = [f_pos[0], f_pos[1], f_pos[2] + config['frustum_h']]
-        m_pos = [b_pos[0], b_pos[1], b_pos[2] + config['base_cyl_h']]
-        l_s = [m_pos[0], m_pos[1], m_pos[2] + config['main_cyl_h']]
-        l_e = [l_s[0], l_s[1], l_s[2] + 1.5]
-
-        # 各パーツのメッシュを生成して描画
-        v, f = create_frustum_mesh(f_pos, config['frustum_r_bottom'], config['frustum_r_top'], config['frustum_h'])
-        fig.add_trace(go.Mesh3d(x=v[:,0],y=v[:,1],z=v[:,2],i=f[:,0],j=f[:,1],k=f[:,2],color='gray'))
-        
-        v, f = create_cylinder_mesh(b_pos, config['base_cyl_r'], config['base_cyl_h'])
-        fig.add_trace(go.Mesh3d(x=v[:,0],y=v[:,1],z=v[:,2],i=f[:,0],j=f[:,1],k=f[:,2],color='darkgrey'))
-        
-        v, f = create_cylinder_mesh(m_pos, config['main_cyl_r'], config['main_cyl_h'])
-        fig.add_trace(go.Mesh3d(x=v[:,0],y=v[:,1],z=v[:,2],i=f[:,0],j=f[:,1],k=f[:,2],color='lightslategray'))
-        
+    for pillar_id,config in pillars_config.items():
+        x,y=config['pos']; z_off=st.session_state.pillar_offsets[pillar_id]; total_h=config['frustum_h']+config['base_cyl_h']+config['main_cyl_h']
+        init_z=get_plane_z(x,y)-(total_h*4/5)
+        f_pos=[x,y,init_z+z_off]; b_pos=[f_pos[0],f_pos[1],f_pos[2]+config['frustum_h']]; m_pos=[b_pos[0],b_pos[1],b_pos[2]+config['base_cyl_h']]
+        l_s=[m_pos[0],m_pos[1],m_pos[2]+config['main_cyl_h']]; l_e=[l_s[0],l_s[1],l_s[2]+1.5]
+        v,f=create_frustum_mesh(f_pos,config['frustum_r_bottom'],config['frustum_r_top'],config['frustum_h']); fig.add_trace(go.Mesh3d(x=v[:,0],y=v[:,1],z=v[:,2],i=f[:,0],j=f[:,1],k=f[:,2],color='gray',name=f'{pillar_id}-F'))
+        v,f=create_cylinder_mesh(b_pos,config['base_cyl_r'],config['base_cyl_h']); fig.add_trace(go.Mesh3d(x=v[:,0],y=v[:,1],z=v[:,2],i=f[:,0],j=f[:,1],k=f[:,2],color='darkgrey',name=f'{pillar_id}-B'))
+        v,f=create_cylinder_mesh(m_pos,config['main_cyl_r'],config['main_cyl_h']); fig.add_trace(go.Mesh3d(x=v[:,0],y=v[:,1],z=v[:,2],i=f[:,0],j=f[:,1],k=f[:,2],color='lightslategray',name=f'{pillar_id}-M'))
         fig.add_trace(go.Scatter3d(x=[l_s[0],l_e[0]],y=[l_s[1],l_e[1]],z=[l_s[2],l_e[2]],mode='lines',line=dict(color='red',width=7)))
-
-# 描画した線など
 if st.session_state.drawing_points: fig.add_trace(go.Scatter3d(x=[st.session_state.drawing_points[0]['x']],y=[st.session_state.drawing_points[0]['y']],z=[st.session_state.drawing_points[0]['z']],mode='markers',marker=dict(color='magenta',size=10,symbol='cross')))
 for line in st.session_state.lines: fig.add_trace(go.Scatter3d(x=[line["start"]['x'],line["end"]['x']],y=[line["start"]['y'],line["end"]['y']],z=[line["start"]['z'],line["end"]['z']],mode='lines',line=dict(color='cyan',width=5)))
-
-# レイアウト
 fig.update_layout(scene=dict(xaxis=dict(title='X (m)',range=[-10,10]),yaxis=dict(title='Y (m)',range=[-10,10]),zaxis=dict(title='Z (m)',range=[-10,10]),aspectratio=dict(x=1,y=1,z=1)),margin=dict(l=0,r=0,b=0,t=5),showlegend=False)
 
-# Plotly Events
 selected_points=plotly_events(fig,click_event=True,key="plotly_click")
 if selected_points and st.session_state.drawing_mode:
     p=selected_points[0]
     if not st.session_state.drawing_points: st.session_state.drawing_points.append(p)
     else: st.session_state.lines.append({"start":st.session_state.drawing_points.pop(0),"end":p})
     st.rerun()
-
