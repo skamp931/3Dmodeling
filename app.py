@@ -21,8 +21,7 @@ def get_plane_z(x, y, slope_degrees=30):
 def create_mesh_from_vertices(vertices):
     """頂点群からDelaunay三角分割でメッシュを作成する"""
     try:
-        if vertices is None or vertices.shape[0] < 3:
-            return np.array([]), np.array([])
+        if vertices is None or vertices.shape[0] < 3: return np.array([]), np.array([])
         points_2d = vertices[:, :2]
         tri = Delaunay(points_2d)
         return vertices, tri.simplices
@@ -31,91 +30,81 @@ def create_mesh_from_vertices(vertices):
         return np.array([]), np.array([])
 
 def create_cylinder_mesh(center_pos, radius, height, n_segments=32):
-    """通常の円柱の頂点と面データを生成する"""
+    """円柱の頂点と面データを生成する"""
     theta = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
-    x_c, y_c = radius * np.cos(theta), radius * np.sin(theta)
-    
+    x_c = radius * np.cos(theta)
+    y_c = radius * np.sin(theta)
     verts = []
-    # Bottom, Top, Center points
     for i in range(n_segments): verts.append([x_c[i], y_c[i], 0])
     for i in range(n_segments): verts.append([x_c[i], y_c[i], height])
-    verts.append([0, 0, 0])      # Bottom center (index: 2n)
-    verts.append([0, 0, height]) # Top center (index: 2n+1)
-    
+    verts.extend([[0, 0, 0], [0, 0, height]])
     verts = np.array(verts, dtype=float) + np.array(center_pos, dtype=float)
-    
     faces = []
-    # Sides
     for i in range(n_segments):
         next_i = (i + 1) % n_segments
         faces.extend([[i, next_i, i + n_segments], [next_i, i + n_segments, next_i + n_segments]])
-    # Caps
     for i in range(n_segments):
         faces.append([i, (i + 1) % n_segments, 2 * n_segments])
         faces.append([i + n_segments, ((i + 1) % n_segments) + n_segments, 2 * n_segments + 1])
-        
     return verts, np.array(faces, dtype=int)
 
-def create_slanted_foundation_mesh(center_pos, radius, top_z, plane_func, n_segments=32):
-    """敷地面に沿った基礎柱のメッシュを生成する"""
+def create_frustum_mesh(center_pos, bottom_radius, top_radius, height, n_segments=32):
+    """通常の円錐台のメッシュを生成する"""
     theta = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
-    x_c, y_c = radius * np.cos(theta), radius * np.sin(theta)
-    
+    xb, yb = bottom_radius * np.cos(theta), bottom_radius * np.sin(theta)
+    xt, yt = top_radius * np.cos(theta), top_radius * np.sin(theta)
     verts = []
-    # Top circle vertices (at a fixed height)
-    for i in range(n_segments):
-        verts.append([center_pos[0] + x_c[i], center_pos[1] + y_c[i], top_z])
-    # Bottom circle vertices (Z value follows the plane)
-    for i in range(n_segments):
-        px, py = center_pos[0] + x_c[i], center_pos[1] + y_c[i]
-        pz = plane_func(px, py)
-        verts.append([px, py, pz])
-    
-    verts = np.array(verts, dtype=float)
-    
+    for i in range(n_segments): verts.append([xb[i], yb[i], 0])
+    for i in range(n_segments): verts.append([xt[i], yt[i], height])
+    verts.extend([[0, 0, 0], [0, 0, height]])
+    verts = np.array(verts, dtype=float) + np.array(center_pos, dtype=float)
     faces = []
-    # Side faces
     for i in range(n_segments):
         next_i = (i + 1) % n_segments
-        # Top circle indices are i, next_i
-        # Bottom circle indices are i + n_segments, next_i + n_segments
-        faces.extend([
-            [i, next_i, i + n_segments],
-            [next_i, next_i + n_segments, i + n_segments]
-        ])
-    
-    # Top cap (flat)
-    top_center_idx = len(verts)
-    verts = np.vstack([verts, [center_pos[0], center_pos[1], top_z]])
+        faces.extend([[i, next_i, i + n_segments], [next_i, i + n_segments, next_i + n_segments]])
     for i in range(n_segments):
-        faces.append([i, (i + 1) % n_segments, top_center_idx])
-
+        faces.append([i, (i + 1) % n_segments, 2 * n_segments])
+        faces.append([i + n_segments, ((i + 1) % n_segments) + n_segments, 2 * n_segments + 1])
     return verts, np.array(faces, dtype=int)
 
+def clip_mesh_by_plane(vertices, faces, plane_func):
+    """メッシュを平面で切断し、上と下のメッシュデータを返す"""
+    plane_z = plane_func(vertices[:, 0], vertices[:, 1])
+    distances = vertices[:, 2] - plane_z
+    vert_sides = np.sign(distances)
+    
+    new_vertices = list(vertices)
+    above_faces, below_faces = [], []
 
-def calculate_buried_volume(verts_list, plane_func, samples=5000):
-    """与えられた頂点群の埋設体積を計算する（このアプリでは基礎柱のみ対象）"""
-    if not verts_list or len(verts_list[0]) == 0: return 0
-    all_vertices = np.vstack(verts_list)
-    min_c, max_c = all_vertices.min(axis=0), all_vertices.max(axis=0)
+    for face in faces:
+        face_sides = vert_sides[face]
+        
+        if np.all(face_sides >= 0): above_faces.append(face); continue
+        if np.all(face_sides < 0): below_faces.append(face); continue
+        
+        if np.sum(face_sides >= 0) > 0: above_faces.append(face)
+        if np.sum(face_sides < 0) > 0: below_faces.append(face)
+
+    return np.array(new_vertices), np.array(above_faces), np.array(below_faces)
+
+
+def calculate_volumes(verts, plane_func, samples=5000):
+    """頂点群の上部・下部の体積を計算"""
+    if verts is None or verts.size == 0: return 0, 0
+    min_c, max_c = verts.min(axis=0), verts.max(axis=0)
     dims, bbox_volume = max_c - min_c, np.prod(max_c - min_c)
-    if bbox_volume == 0: return 0
+    if bbox_volume == 0: return 0, 0
     
-    # モンテカルロ法で体積を近似
     random_points = np.random.rand(samples, 3) * dims + min_c
+    plane_z_at_points = plane_func(random_points[:, 0], random_points[:, 1])
     
-    # Note: This is an approximation of the bounding box volume, not the true mesh volume.
-    # For a simple cylinder-like shape, it's a reasonable estimate.
-    # A more accurate method would be point-in-mesh tests, which are much slower.
+    is_above = random_points[:, 2] >= plane_z_at_points
+    is_below = ~is_above
     
-    # 基礎柱は定義上、常に敷地面より下なので、単純にバウンディングボックスの体積を返す
-    # ただし、より正確には、その形状の体積を計算すべき
-    # ここでは簡易的に、理論上の円柱体積を計算する
-    height = np.mean(all_vertices[:, 2].max() - plane_func(all_vertices[:, 0], all_vertices[:, 1]))
-    radius = np.mean(np.sqrt(all_vertices[:,0]**2 + all_vertices[:,1]**2)) # this is not robust
+    vol_above = bbox_volume * (np.sum(is_above) / samples)
+    vol_below = bbox_volume * (np.sum(is_below) / samples)
     
-    # For simplicity and performance, we continue using the bounding box approximation
-    return bbox_volume
+    return vol_above, vol_below
 
 # --- データ定義 ---
 def get_default_site_data():
@@ -125,12 +114,13 @@ def get_default_site_data():
 
 def get_default_pillars_config():
     dist = 7.0 / 2.0
-    return {
-        'A': {'pos': [-dist, dist], 'base_cyl_r': 2.5, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
-        'B': {'pos': [dist, dist], 'base_cyl_r': 2.5, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
-        'C': {'pos': [dist, -dist], 'base_cyl_r': 2.5, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
-        'D': {'pos': [-dist, -dist], 'base_cyl_r': 2.5, 'base_cyl_h': 1.5, 'main_cyl_r': 0.5, 'main_cyl_h': 6.0},
+    config = {
+        'A': {'pos':[-dist, dist],'foundation_h':1.0,'foundation_r_bottom':3.0,'foundation_r_top':2.5,'base_cyl_r':2.5,'base_cyl_h':1.5,'main_cyl_r':0.5,'main_cyl_h':6.0},
+        'B': {'pos':[dist, dist],'foundation_h':1.0,'foundation_r_bottom':3.0,'foundation_r_top':2.5,'base_cyl_r':2.5,'base_cyl_h':1.5,'main_cyl_r':0.5,'main_cyl_h':6.0},
+        'C': {'pos':[dist, -dist],'foundation_h':1.0,'foundation_r_bottom':3.0,'foundation_r_top':2.5,'base_cyl_r':2.5,'base_cyl_h':1.5,'main_cyl_r':0.5,'main_cyl_h':6.0},
+        'D': {'pos':[-dist, -dist],'foundation_h':1.0,'foundation_r_bottom':3.0,'foundation_r_top':2.5,'base_cyl_r':2.5,'base_cyl_h':1.5,'main_cyl_r':0.5,'main_cyl_h':6.0},
     }
+    return config
 
 # --- メインアプリケーション ---
 init_session_state()
@@ -151,24 +141,31 @@ if site_vertices is not None and site_vertices.size > 0:
 # 柱の描画と体積計算用のデータ準備
 pillar_volumes = {}
 for pillar_id, config in pillars_config.items():
-    x, y = config['pos']
-    z_off = st.session_state.pillar_offsets.get(pillar_id, 0.0)
-    total_h = config['base_cyl_h'] + config['main_cyl_h']
+    x, y = config['pos']; z_off = st.session_state.pillar_offsets.get(pillar_id, 0.0)
+    total_h = config['foundation_h'] + config['base_cyl_h'] + config['main_cyl_h']
     init_z = get_plane_z(x, y) - (total_h * 4/5)
     
-    # パーツの位置を計算
-    base_pos_z = init_z + z_off
+    foundation_pos_z = init_z + z_off
+    base_pos_z = foundation_pos_z + config['foundation_h']
     main_pos_z = base_pos_z + config['base_cyl_h']
     
+    foundation_pos = [x, y, foundation_pos_z]
     base_pos = [x, y, base_pos_z]
     main_pos = [x, y, main_pos_z]
     
-    # --- 新しい基礎柱（計算対象）---
-    foundation_verts, foundation_faces = create_slanted_foundation_mesh([x, y, 0], config['base_cyl_r'], base_pos_z, get_plane_z)
-    fig.add_trace(go.Mesh3d(x=foundation_verts[:,0], y=foundation_verts[:,1], z=foundation_verts[:,2], i=foundation_faces[:,0],j=foundation_faces[:,1],k=foundation_faces[:,2], color='limegreen', opacity=0.3, name=f"Foundation {pillar_id}"))
+    # --- 基礎円錐台（計算対象）---
+    frustum_verts, frustum_faces = create_frustum_mesh(foundation_pos, config['foundation_r_bottom'], config['foundation_r_top'], config['foundation_h'])
     
     # --- 埋設体積を計算 ---
-    pillar_volumes[pillar_id] = calculate_buried_volume([foundation_verts], get_plane_z)
+    vol_above, vol_below = calculate_volumes(frustum_verts, get_plane_z)
+    pillar_volumes[pillar_id] = {'above': vol_above, 'below': vol_below}
+
+    # --- 敷地で分割して描画 ---
+    verts, above_faces, below_faces = clip_mesh_by_plane(frustum_verts, frustum_faces, get_plane_z)
+    if above_faces.size > 0:
+        fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=above_faces[:,0],j=above_faces[:,1],k=above_faces[:,2],color='limegreen',opacity=0.3))
+    if below_faces.size > 0:
+        fig.add_trace(go.Mesh3d(x=verts[:,0],y=verts[:,1],z=verts[:,2],i=below_faces[:,0],j=below_faces[:,1],k=below_faces[:,2],color='sienna',opacity=1.0))
 
     # --- 土台円柱 ---
     verts, faces = create_cylinder_mesh(base_pos, config['base_cyl_r'], config['base_cyl_h'])
@@ -195,8 +192,10 @@ cols = st.columns(len(pillars_config))
 for col, pillar_id in zip(cols, pillars_config.keys()):
     with col:
         st.markdown(f"**{pillar_id}脚**")
-        st.markdown("基礎部分の体積")
-        st.subheader(f"{pillar_volumes.get(pillar_id, 0):.2f} m³")
+        st.markdown("地上部の体積")
+        st.subheader(f"{pillar_volumes.get(pillar_id, {}).get('above', 0):.2f} m³")
+        st.markdown("埋設部の体積")
+        st.subheader(f"{pillar_volumes.get(pillar_id, {}).get('below', 0):.2f} m³")
         up_down_cols = st.columns(2)
         with up_down_cols[0]:
             if st.button(f"⬆️##{pillar_id}", use_container_width=True):
